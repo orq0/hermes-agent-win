@@ -1,0 +1,462 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>Hermes Desktop</value>
+  </data>
+  <data name="ChatHeaderTitle.Text" xml:space="preserve">
+    <value>Hermes Chat</value>
+  </data>
+  <data name="ChatHeaderStatusFormat" xml:space="preserve">
+    <value>{0} to {1}</value>
+  </data>
+  <data name="ChatConversationTitle.Text" xml:space="preserve">
+    <value>Conversation</value>
+  </data>
+  <data name="ChatNewChatButton.Content" xml:space="preserve">
+    <value>New chat</value>
+  </data>
+  <data name="ChatNewChatButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Start a fresh Hermes desktop conversation</value>
+  </data>
+  <data name="ChatSessionNew" xml:space="preserve">
+    <value>New conversation. Session continuity starts with your first message.</value>
+  </data>
+  <data name="ChatSessionExistingFormat" xml:space="preserve">
+    <value>Continuing Hermes session {0}</value>
+  </data>
+  <data name="ChatInputBox.PlaceholderText" xml:space="preserve">
+    <value>Ask Hermes to do something. Press Ctrl+Enter to send.</value>
+  </data>
+  <data name="ChatOpenCliButton.Content" xml:space="preserve">
+    <value>Open terminal chat</value>
+  </data>
+  <data name="ChatOpenCliButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes terminal chat</value>
+  </data>
+  <data name="ChatSendButton.Content" xml:space="preserve">
+    <value>Send</value>
+  </data>
+  <data name="ChatSendButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Send the current message</value>
+  </data>
+  <data name="ChatInitialAssistantMessage" xml:space="preserve">
+    <value>Hermes is ready. This desktop chat keeps the conversation front and center while the agent runs through {1} behind the scenes for {0}.</value>
+  </data>
+  <data name="ChatComposerHint" xml:space="preserve">
+    <value>Desktop chat is ready.</value>
+  </data>
+  <data name="ChatComposerReady" xml:space="preserve">
+    <value>Ready for the next message.</value>
+  </data>
+  <data name="ChatComposerWaiting" xml:space="preserve">
+    <value>Hermes is thinking...</value>
+  </data>
+  <data name="ChatComposerOffline" xml:space="preserve">
+    <value>Hermes is unavailable right now.</value>
+  </data>
+  <data name="ChatStatusChecking" xml:space="preserve">
+    <value>Checking connection...</value>
+  </data>
+  <data name="ChatErrorMessageFormat" xml:space="preserve">
+    <value>The Hermes request failed: {0}</value>
+  </data>
+  <data name="ChatUserLabel" xml:space="preserve">
+    <value>You</value>
+  </data>
+  <data name="ChatAssistantLabel" xml:space="preserve">
+    <value>Hermes</value>
+  </data>
+  <data name="ChatSystemLabel" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="ChatInspectorTabSession.Text" xml:space="preserve">
+    <value>Session</value>
+  </data>
+  <data name="ChatInspectorTabContext.Text" xml:space="preserve">
+    <value>Context</value>
+  </data>
+  <data name="ChatInspectorTabFiles.Text" xml:space="preserve">
+    <value>Files</value>
+  </data>
+  <data name="ChatInspectorSessionTitle.Text" xml:space="preserve">
+    <value>Active session</value>
+  </data>
+  <data name="ChatInspectorModelTitle.Text" xml:space="preserve">
+    <value>Model context</value>
+  </data>
+  <data name="ChatInspectorWorkspaceTitle.Text" xml:space="preserve">
+    <value>Workspace</value>
+  </data>
+  <data name="ChatInspectorSessionEmpty" xml:space="preserve">
+    <value>No active Hermes session yet.</value>
+  </data>
+  <data name="ChatInspectorMessageCountFormat" xml:space="preserve">
+    <value>{0} messages in this desktop thread.</value>
+  </data>
+  <data name="ChatInspectorOpenWorkspaceButton.Content" xml:space="preserve">
+    <value>Open workspace</value>
+  </data>
+  <data name="ChatInspectorOpenLogsButton.Content" xml:space="preserve">
+    <value>Open logs</value>
+  </data>
+  <data name="ChatInspectorOpenConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="ShellNavigation.PaneTitle" xml:space="preserve">
+    <value>Hermes Desktop</value>
+  </data>
+  <data name="DashboardNavItem.Content" xml:space="preserve">
+    <value>Overview</value>
+  </data>
+  <data name="ChatNavItem.Content" xml:space="preserve">
+    <value>Chat</value>
+  </data>
+  <data name="IntegrationsNavItem.Content" xml:space="preserve">
+    <value>Integrations</value>
+  </data>
+  <data name="SettingsNavItem.Content" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="DashboardHeroEyebrow.Text" xml:space="preserve">
+    <value>Native control room</value>
+  </data>
+  <data name="DashboardHeroTitle.Text" xml:space="preserve">
+    <value>Keep Hermes, local models, and messaging in one desktop shell.</value>
+  </data>
+  <data name="DashboardHeroSubtitle.Text" xml:space="preserve">
+    <value>This first pass gives you a Windows-native workspace around the agent you already installed, with quick launch points for the CLI, config, logs, and bot integrations.</value>
+  </data>
+  <data name="DashboardLaunchChatButton.Content" xml:space="preserve">
+    <value>Launch CLI</value>
+  </data>
+  <data name="DashboardLaunchChatButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Launch Hermes CLI</value>
+  </data>
+  <data name="DashboardOpenLogsButton.Content" xml:space="preserve">
+    <value>Open logs</value>
+  </data>
+  <data name="DashboardOpenLogsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes logs folder</value>
+  </data>
+  <data name="DashboardOpenConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="DashboardOpenConfigButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes config file</value>
+  </data>
+  <data name="DashboardProviderLabel.Text" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="DashboardModelLabel.Text" xml:space="preserve">
+    <value>Default model</value>
+  </data>
+  <data name="DashboardGatewayLabel.Text" xml:space="preserve">
+    <value>Messaging</value>
+  </data>
+  <data name="DashboardPathsSectionTitle.Text" xml:space="preserve">
+    <value>Live paths</value>
+  </data>
+  <data name="DashboardHermesHomeLabel.Text" xml:space="preserve">
+    <value>Hermes home</value>
+  </data>
+  <data name="DashboardConfigLabel.Text" xml:space="preserve">
+    <value>Config file</value>
+  </data>
+  <data name="DashboardLogsLabel.Text" xml:space="preserve">
+    <value>Logs folder</value>
+  </data>
+  <data name="DashboardWorkspaceLabel.Text" xml:space="preserve">
+    <value>Agent repo</value>
+  </data>
+  <data name="DashboardStatusSectionTitle.Text" xml:space="preserve">
+    <value>Current runtime</value>
+  </data>
+  <data name="DashboardCliLabel.Text" xml:space="preserve">
+    <value>CLI</value>
+  </data>
+  <data name="DashboardEndpointLabel.Text" xml:space="preserve">
+    <value>Base URL</value>
+  </data>
+  <data name="DashboardPortLabel.Text" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="DashboardQuickNotesTitle.Text" xml:space="preserve">
+    <value>What this shell is for</value>
+  </data>
+  <data name="DashboardQuickNotesLine1.Text" xml:space="preserve">
+    <value>Launch the agent fast without reopening setup scripts.</value>
+  </data>
+  <data name="DashboardQuickNotesLine2.Text" xml:space="preserve">
+    <value>Check the active model target and bot readiness at a glance.</value>
+  </data>
+  <data name="DashboardQuickNotesLine3.Text" xml:space="preserve">
+    <value>Keep a Windows-native control surface separate from OpenClaw.</value>
+  </data>
+  <data name="ChatPageEyebrow.Text" xml:space="preserve">
+    <value>Chat surface</value>
+  </data>
+  <data name="ChatPageTitle.Text" xml:space="preserve">
+    <value>Talk to your configured local model right inside the desktop shell.</value>
+  </data>
+  <data name="ChatPageSubtitle.Text" xml:space="preserve">
+    <value>This desktop view uses the same configured model endpoint as Hermes. Keep the CLI button around for the full tool-heavy agent loop while we bring more of that flow into the app.</value>
+  </data>
+  <data name="ChatLaunchButton.Content" xml:space="preserve">
+    <value>Launch Hermes chat</value>
+  </data>
+  <data name="ChatLaunchButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Launch Hermes chat from the desktop shell</value>
+  </data>
+  <data name="ChatConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="ChatConfigButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes config from the chat page</value>
+  </data>
+  <data name="ChatSessionsTitle.Text" xml:space="preserve">
+    <value>Recent session ideas</value>
+  </data>
+  <data name="ChatSessionsItem1Header.Text" xml:space="preserve">
+    <value>Local agent work</value>
+  </data>
+  <data name="ChatSessionsItem1Body.Text" xml:space="preserve">
+    <value>Run coding and ops tasks against the local model endpoint you already verified.</value>
+  </data>
+  <data name="ChatSessionsItem2Header.Text" xml:space="preserve">
+    <value>Messaging escalation</value>
+  </data>
+  <data name="ChatSessionsItem2Body.Text" xml:space="preserve">
+    <value>Keep Discord or Telegram as light-touch entry points while Hermes stays local.</value>
+  </data>
+  <data name="ChatSessionsItem3Header.Text" xml:space="preserve">
+    <value>Desktop-first workflows</value>
+  </data>
+  <data name="ChatSessionsItem3Body.Text" xml:space="preserve">
+    <value>Use this shell as the operational hub and drop into the CLI only when you want full agent control.</value>
+  </data>
+  <data name="ChatWorkspaceTitle.Text" xml:space="preserve">
+    <value>Planned desktop flow</value>
+  </data>
+  <data name="ChatWorkspaceLine1.Text" xml:space="preserve">
+    <value>Native conversation list on the left.</value>
+  </data>
+  <data name="ChatWorkspaceLine2.Text" xml:space="preserve">
+    <value>Task and tool activity on the right.</value>
+  </data>
+  <data name="ChatWorkspaceLine3.Text" xml:space="preserve">
+    <value>Quick jump into Hermes chat whenever you want the raw agent loop.</value>
+  </data>
+  <data name="ChatComposerLabel.Text" xml:space="preserve">
+    <value>Desktop composer preview</value>
+  </data>
+  <data name="ChatComposerTextBox.PlaceholderText" xml:space="preserve">
+    <value>Native message composer and task queue will land here next.</value>
+  </data>
+  <data name="IntegrationsEyebrow.Text" xml:space="preserve">
+    <value>Messaging gateways</value>
+  </data>
+  <data name="IntegrationsTitle.Text" xml:space="preserve">
+    <value>Discord and Telegram can sit on top of the same Hermes backend.</value>
+  </data>
+  <data name="IntegrationsSubtitle.Text" xml:space="preserve">
+    <value>These cards show whether tokens are present in the current environment and where to go next.</value>
+  </data>
+  <data name="IntegrationsTelegramTitle.Text" xml:space="preserve">
+    <value>Telegram</value>
+  </data>
+  <data name="IntegrationsTelegramDetail.Text" xml:space="preserve">
+    <value>Best for direct, lightweight, mobile-friendly access to the agent.</value>
+  </data>
+  <data name="IntegrationsDiscordTitle.Text" xml:space="preserve">
+    <value>Discord</value>
+  </data>
+  <data name="IntegrationsDiscordDetail.Text" xml:space="preserve">
+    <value>Better for channel workflows, shared bots, and team operations.</value>
+  </data>
+  <data name="IntegrationsGatewayTitle.Text" xml:space="preserve">
+    <value>Gateway operations</value>
+  </data>
+  <data name="IntegrationsGatewayLine1.Text" xml:space="preserve">
+    <value>Run the gateway as a normal Windows background process for now.</value>
+  </data>
+  <data name="IntegrationsGatewayLine2.Text" xml:space="preserve">
+    <value>Keep Hermes pointed at the local model endpoint you already tested.</value>
+  </data>
+  <data name="IntegrationsGatewayLine3.Text" xml:space="preserve">
+    <value>Add bot tokens before you expose public message entry points.</value>
+  </data>
+  <data name="IntegrationsOpenLogsButton.Content" xml:space="preserve">
+    <value>Open logs</value>
+  </data>
+  <data name="IntegrationsOpenLogsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes logs from the integrations page</value>
+  </data>
+  <data name="IntegrationsOpenConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="IntegrationsOpenConfigButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes config from the integrations page</value>
+  </data>
+  <data name="SettingsEyebrow.Text" xml:space="preserve">
+    <value>Local setup</value>
+  </data>
+  <data name="SettingsTitle.Text" xml:space="preserve">
+    <value>These are the runtime values the desktop shell is reading right now.</value>
+  </data>
+  <data name="SettingsSubtitle.Text" xml:space="preserve">
+    <value>The settings page is where model selection, gateway controls, and workspace management should live next.</value>
+  </data>
+  <data name="SettingsRuntimeTitle.Text" xml:space="preserve">
+    <value>Model and runtime</value>
+  </data>
+  <data name="SettingsProviderLabel.Text" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="SettingsBaseUrlLabel.Text" xml:space="preserve">
+    <value>Base URL</value>
+  </data>
+  <data name="SettingsModelLabel.Text" xml:space="preserve">
+    <value>Default model</value>
+  </data>
+  <data name="SettingsGatewayTitle.Text" xml:space="preserve">
+    <value>Gateway readiness</value>
+  </data>
+  <data name="SettingsGatewayLine1.Text" xml:space="preserve">
+    <value>Telegram token</value>
+  </data>
+  <data name="SettingsGatewayLine2.Text" xml:space="preserve">
+    <value>Discord token</value>
+  </data>
+  <data name="SettingsPathsTitle.Text" xml:space="preserve">
+    <value>Files and folders</value>
+  </data>
+  <data name="SettingsHomeButton.Content" xml:space="preserve">
+    <value>Open Hermes home</value>
+  </data>
+  <data name="SettingsHomeButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes home folder</value>
+  </data>
+  <data name="SettingsConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="SettingsConfigButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes config file from settings</value>
+  </data>
+  <data name="SettingsLogsButton.Content" xml:space="preserve">
+    <value>Open logs</value>
+  </data>
+  <data name="SettingsLogsButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open Hermes logs folder from settings</value>
+  </data>
+  <data name="SettingsWorkspaceButton.Content" xml:space="preserve">
+    <value>Open agent repo</value>
+  </data>
+  <data name="SettingsWorkspaceButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open the Hermes agent repo from settings</value>
+  </data>
+  <data name="StatusInstalled" xml:space="preserve">
+    <value>Installed</value>
+  </data>
+  <data name="StatusMissing" xml:space="preserve">
+    <value>Missing</value>
+  </data>
+  <data name="StatusConfigured" xml:space="preserve">
+    <value>Configured</value>
+  </data>
+  <data name="StatusNeedsSetup" xml:space="preserve">
+    <value>Needs setup</value>
+  </data>
+  <data name="StatusReady" xml:space="preserve">
+    <value>Ready</value>
+  </data>
+  <data name="StatusConnected" xml:space="preserve">
+    <value>Connected</value>
+  </data>
+  <data name="StatusOffline" xml:space="preserve">
+    <value>Offline</value>
+  </data>
+  <data name="StatusDetected" xml:space="preserve">
+    <value>Detected</value>
+  </data>
+  <data name="StatusNotDetected" xml:space="preserve">
+    <value>Not detected</value>
+  </data>
+  <data name="CliReadySummary" xml:space="preserve">
+    <value>Native install detected</value>
+  </data>
+  <data name="CliMissingSummary" xml:space="preserve">
+    <value>Install not found</value>
+  </data>
+  <data name="MessagingReadySummary" xml:space="preserve">
+    <value>At least one bot token is available</value>
+  </data>
+  <data name="MessagingSetupSummary" xml:space="preserve">
+    <value>Add Telegram or Discord tokens next</value>
+  </data>
+  <data name="ChatConnectionCardTitle.Text" xml:space="preserve">
+    <value>Live endpoint</value>
+  </data>
+  <data name="ChatRuntimeTitle.Text" xml:space="preserve">
+    <value>Runtime details</value>
+  </data>
+  <data name="ChatConnectionStatusLabel.Text" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="ChatConnectionEndpointLabel.Text" xml:space="preserve">
+    <value>Endpoint</value>
+  </data>
+  <data name="ChatConnectionProviderLabel.Text" xml:space="preserve">
+    <value>Provider</value>
+  </data>
+  <data name="ChatConnectionModelLabel.Text" xml:space="preserve">
+    <value>Model</value>
+  </data>
+  <data name="ChatRefreshButton.Content" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="ChatRefreshButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Refresh the model endpoint status</value>
+  </data>
+  <data name="ChatOpenConfigButton.Content" xml:space="preserve">
+    <value>Open config</value>
+  </data>
+  <data name="ChatOpenConfigButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Open the Hermes config file from the desktop chat page</value>
+  </data>
+  <data name="ChatGuideTitle.Text" xml:space="preserve">
+    <value>How to use this view</value>
+  </data>
+  <data name="ChatGuideLine1.Text" xml:space="preserve">
+    <value>Use this page for normal back-and-forth model chat inside the app.</value>
+  </data>
+  <data name="ChatGuideLine2.Text" xml:space="preserve">
+    <value>The runtime card shows the exact endpoint, provider, and model the page is using.</value>
+  </data>
+  <data name="ChatGuideLine3.Text" xml:space="preserve">
+    <value>If you want Hermes CLI tools and the full terminal workflow, jump to the CLI button on the left.</value>
+  </data>
+  <data name="ChatConversationSubtitle.Text" xml:space="preserve">
+    <value>Messages stay in this desktop session until you clear them.</value>
+  </data>
+  <data name="ChatInputLabel.Text" xml:space="preserve">
+    <value>Message</value>
+  </data>
+  <data name="ChatClearButton.Content" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="ChatClearButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Clear the desktop chat conversation</value>
+  </data>
+</root>

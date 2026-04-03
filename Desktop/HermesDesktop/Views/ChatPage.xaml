@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="HermesDesktop.Views.ChatPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:HermesDesktop.Models"
+    Background="Transparent"
+    Loaded="OnPageLoaded"
+    mc:Ignorable="d">
+    <Page.KeyboardAccelerators>
+        <KeyboardAccelerator Key="Enter" Modifiers="Control" Invoked="SendKeyboardAccelerator_Invoked" />
+    </Page.KeyboardAccelerators>
+
+    <Grid Padding="20,12,24,20" ColumnSpacing="14" RowSpacing="14">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="292" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Grid.ColumnSpan="2" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Hermes.C# - Your AI Teammate" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Style="{StaticResource BodySecondaryTextStyle}" Text="{x:Bind ConnectionState, Mode=OneWay}" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Button Content="New Chat" Click="NewChat_Click" Background="{StaticResource AppInsetBrush}" BorderBrush="{StaticResource AppSubtleStrokeBrush}" Foreground="White" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Main Chat Area -->
+        <Border Grid.Row="1" Style="{StaticResource SurfaceCardStyle}" Padding="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="1" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Messages -->
+                <ListView x:Name="MessagesList" Grid.Row="1" Padding="18" Background="Transparent" BorderThickness="0"
+                    ItemsSource="{x:Bind Messages, Mode=OneWay}" SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:ChatMessageItem">
+                            <Grid Margin="0,0,0,10">
+                                <Border MaxWidth="780" HorizontalAlignment="{x:Bind BubbleAlignment}"
+                                    Background="{x:Bind BubbleBackground}" BorderBrush="{x:Bind BubbleBorderBrush}"
+                                    BorderThickness="1" CornerRadius="12" Padding="16,12">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Foreground="{x:Bind LabelBrush}" Style="{StaticResource LabelTextStyle}" Text="{x:Bind AuthorLabel}" />
+                                        <TextBlock Text="{x:Bind Content}" TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <!-- Input Area -->
+                <Grid Grid.Row="3" Padding="18,14,18,18" RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Permission Mode -->
+                    <ComboBox x:Name="PermissionModeSelector" Grid.Row="0" Margin="0,0,0,10" HorizontalAlignment="Stretch"
+                        SelectionChanged="PermissionModeSelector_SelectionChanged">
+                        <ComboBoxItem Content="Default (Ask Everything)" Tag="Default" />
+                        <ComboBoxItem Content="Plan Mode (Read-Only)" Tag="Plan" />
+                        <ComboBoxItem Content="Auto Mode" Tag="Auto" />
+                        <ComboBoxItem Content="Accept Edits" Tag="AcceptEdits" />
+                        <ComboBoxItem Content="Bypass (DANGEROUS)" Tag="Bypass" />
+                    </ComboBox>
+
+                    <!-- Input -->
+                    <Grid Grid.Row="1" ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox x:Name="PromptTextBox" Grid.Row="1" Grid.Column="0" MinHeight="88" AcceptsReturn="True"
+                            Background="{StaticResource AppInsetBrush}" BorderBrush="{StaticResource AppStrokeBrush}"
+                            Foreground="White" TextWrapping="Wrap" />
+
+                        <Button x:Name="SendButton" Grid.Column="1" Content="Send" Click="SendPrompt_Click"
+                            Background="{StaticResource AppAccentBrush}" BorderBrush="{StaticResource AppAccentBrush}"
+                            Foreground="#16110D" VerticalAlignment="Bottom" Padding="30,10" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Right Panel -->
+        <ScrollViewer Grid.Column="1" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="1">
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Buddy" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource AppAccentTextBrush}" />
+                        <TextBlock Text="Buddy system - coming soon" Style="{StaticResource BodySecondaryTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Skills" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource AppAccentTextBrush}" />
+                        <TextBlock Text="Skills system - coming soon" Style="{StaticResource BodySecondaryTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Tasks" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource AppAccentTextBrush}" />
+                        <TextBlock Text="Task management - coming soon" Style="{StaticResource BodySecondaryTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Team" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource AppAccentTextBrush}" />
+                        <TextBlock Text="Multi-agent teams - coming soon" Style="{StaticResource BodySecondaryTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Dream" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource AppAccentTextBrush}" />
+                        <TextBlock Text="Auto-consolidation - coming soon" Style="{StaticResource BodySecondaryTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SurfaceCardStyle}" Background="{StaticResource AppPaneBackgroundBrush}" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Session" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="{x:Bind SessionIdText, Mode=OneWay}" FontSize="11" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

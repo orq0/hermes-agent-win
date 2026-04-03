@@ -1,0 +1,249 @@
+using System;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Threading;
+using System.Threading.Tasks;
+using HermesDesktop.Models;
+using HermesDesktop.Services;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
+using Microsoft.Windows.ApplicationModel.Resources;
+
+
+namespace HermesDesktop.Views;
+
+public sealed partial class ChatPage : Page
+{
+    private static readonly ResourceLoader ResourceLoader = new();
+
+    private readonly HermesChatService _chatService = new();
+    private readonly Brush _assistantBackgroundBrush;
+    private readonly Brush _assistantBorderBrush;
+    private readonly Brush _userBackgroundBrush;
+    private readonly Brush _userBorderBrush;
+    private readonly Brush _systemBackgroundBrush;
+    private readonly Brush _systemBorderBrush;
+    private readonly Brush _accentLabelBrush;
+    private readonly Brush _secondaryLabelBrush;
+
+    private bool _initialized;
+    private bool _isBusy;
+    private string _connectionState;
+    private string _composerStatus;
+    private string _permissionMode;
+
+    public ChatPage()
+    {
+        InitializeComponent();
+
+        _assistantBackgroundBrush = GetBrush("AppPanelBrush");
+        _assistantBorderBrush = GetBrush("AppStrokeBrush");
+        _userBackgroundBrush = GetBrush("AppUserBubbleBrush");
+        _userBorderBrush = GetBrush("AppAccentBrush");
+        _systemBackgroundBrush = GetBrush("AppInsetBrush");
+        _systemBorderBrush = GetBrush("AppSubtleStrokeBrush");
+        _accentLabelBrush = GetBrush("AppAccentTextBrush");
+        _secondaryLabelBrush = GetBrush("AppTextSecondaryBrush");
+
+        _connectionState = ResourceLoader.GetString("ChatStatusChecking");
+        _composerStatus = ResourceLoader.GetString("ChatComposerHint");
+        _permissionMode = "Default";
+    }
+
+    public ObservableCollection<ChatMessageItem> Messages { get; } = new();
+
+    public string ConnectionState => _connectionState;
+    public string ComposerStatus => _composerStatus;
+    public string PermissionMode => _permissionMode;
+    public string SessionIdText => string.IsNullOrEmpty(_sessionId) ? "New Session" : $"Session: {_sessionId}";
+    public string MessageCountSummary => $"{Messages.Count} messages";
+
+    private string _sessionId => _chatService.CurrentSessionId ?? "";
+
+    private async void OnPageLoaded(object sender, RoutedEventArgs e)
+    {
+        if (_initialized)
+        {
+            return;
+        }
+
+        _initialized = true;
+        AppendSystemMessage(
+            string.Format(
+                CultureInfo.CurrentCulture,
+                ResourceLoader.GetString("ChatInitialAssistantMessage"),
+                "Hermes.C# Workspace",
+                "Qwen3.5"));
+        
+        await RefreshConnectionStatusAsync();
+        await RefreshUiDataAsync();
+    }
+
+    private async void SendPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        await SendPromptAsync();
+    }
+
+    private async void SendKeyboardAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        await SendPromptAsync();
+    }
+
+    private void PermissionModeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PermissionModeSelector.SelectedItem is ComboBoxItem item && item.Tag is string modeTag)
+        {
+            _permissionMode = modeTag;
+            Bindings.Update();
+        }
+    }
+
+    private async void NewChat_Click(object sender, RoutedEventArgs e)
+    {
+        _chatService.ResetConversation();
+        Messages.Clear();
+        
+        AppendSystemMessage(
+            string.Format(
+                CultureInfo.CurrentCulture,
+                ResourceLoader.GetString("ChatInitialAssistantMessage"),
+                "Hermes.C# Workspace",
+                "Qwen3.5"));
+        
+        _composerStatus = ResourceLoader.GetString("ChatComposerHint");
+        await RefreshConnectionStatusAsync();
+        Bindings.Update();
+    }
+
+    private async Task SendPromptAsync()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        string prompt = PromptTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return;
+        }
+
+        PromptTextBox.Text = string.Empty;
+        AppendUserMessage(prompt);
+        SetBusyState(true, ResourceLoader.GetString("ChatComposerWaiting"));
+
+        try
+        {
+            var reply = await _chatService.SendAsync(prompt, CancellationToken.None);
+            AppendAssistantMessage(reply.Response);
+            _connectionState = ResourceLoader.GetString("StatusConnected");
+            _composerStatus = ResourceLoader.GetString("ChatComposerReady");
+            
+            // UI data will be updated as pillars are integrated
+        }
+        catch (Exception ex)
+        {
+            _connectionState = ResourceLoader.GetString("StatusOffline");
+            _composerStatus = ResourceLoader.GetString("ChatComposerOffline");
+            AppendSystemMessage(
+                string.Format(
+                    CultureInfo.CurrentCulture,
+                    ResourceLoader.GetString("ChatErrorMessageFormat"),
+                    ex.Message));
+        }
+        finally
+        {
+            SetBusyState(false, _composerStatus);
+            Bindings.Update();
+            PromptTextBox.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private async Task RefreshConnectionStatusAsync()
+    {
+        _connectionState = ResourceLoader.GetString("ChatStatusChecking");
+        Bindings.Update();
+
+        (bool isHealthy, string detail) = await _chatService.CheckHealthAsync(CancellationToken.None);
+        _connectionState = ResourceLoader.GetString(isHealthy ? "StatusConnected" : "StatusOffline");
+        
+        if (!_isBusy)
+        {
+            _composerStatus = ResourceLoader.GetString(
+                isHealthy ? "ChatComposerReady" : "ChatComposerOffline");
+        }
+
+        Bindings.Update();
+    }
+
+    private Task RefreshUiDataAsync()
+    {
+        // Placeholder for future pillar integration
+        return Task.CompletedTask;
+    }
+
+    private void SetBusyState(bool isBusy, string statusText)
+    {
+        _isBusy = isBusy;
+        _composerStatus = statusText;
+        SendButton.IsEnabled = !isBusy;
+        PromptTextBox.IsEnabled = !isBusy;
+        Bindings.Update();
+    }
+
+    private void AppendUserMessage(string message)
+    {
+        AddVisualMessage(
+            ResourceLoader.GetString("ChatUserLabel"),
+            message,
+            HorizontalAlignment.Right,
+            _userBackgroundBrush,
+            _userBorderBrush,
+            _accentLabelBrush);
+    }
+
+    private void AppendAssistantMessage(string message)
+    {
+        AddVisualMessage(
+            ResourceLoader.GetString("ChatAssistantLabel"),
+            message,
+            HorizontalAlignment.Left,
+            _assistantBackgroundBrush,
+            _assistantBorderBrush,
+            _secondaryLabelBrush);
+    }
+
+    private void AppendSystemMessage(string message)
+    {
+        AddVisualMessage(
+            ResourceLoader.GetString("ChatSystemLabel"),
+            message,
+            HorizontalAlignment.Left,
+            _systemBackgroundBrush,
+            _systemBorderBrush,
+            _secondaryLabelBrush);
+    }
+
+    private void AddVisualMessage(
+        string authorLabel,
+        string content,
+        HorizontalAlignment alignment,
+        Brush background,
+        Brush borderBrush,
+        Brush labelBrush)
+    {
+        ChatMessageItem item = new(authorLabel, content, alignment, background, borderBrush, labelBrush);
+        Messages.Add(item);
+        MessagesList.ScrollIntoView(item);
+        Bindings.Update();
+    }
+
+    private static Brush GetBrush(string resourceKey)
+    {
+        return (Brush)Application.Current.Resources[resourceKey];
+    }
+}
