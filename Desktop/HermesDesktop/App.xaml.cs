@@ -9,6 +9,11 @@ using Hermes.Agent.Skills;
 using Hermes.Agent.Permissions;
 using Hermes.Agent.Tasks;
 using Hermes.Agent.Buddy;
+using Hermes.Agent.Context;
+using Hermes.Agent.Agents;
+using Hermes.Agent.Coordinator;
+using Hermes.Agent.Mcp;
+using Hermes.Agent.Tools;
 using HermesDesktop.Services;
 using System;
 using System.IO;
@@ -57,9 +62,6 @@ public partial class App : Application
             };
         });
 
-        // Core agent
-        services.AddSingleton<Agent>();
-
         // Hermes home directory
         var hermesHome = HermesEnvironment.HermesHomePath;
         var projectDir = Path.Combine(hermesHome, "hermes-cs");
@@ -99,10 +101,151 @@ public partial class App : Application
             buddyDir,
             sp.GetRequiredService<IChatClient>()));
 
+        // Token budget & Prompt builder for Context Runtime
+        services.AddSingleton(sp => new TokenBudget(maxTokens: 8000, recentTurnWindow: 6));
+        services.AddSingleton(sp => new PromptBuilder(
+            "You are Hermes, an intelligent coding assistant. Help the user with their tasks efficiently and accurately."));
+
+        // Context manager
+        services.AddSingleton(sp => new ContextManager(
+            sp.GetRequiredService<TranscriptStore>(),
+            sp.GetRequiredService<IChatClient>(),
+            sp.GetRequiredService<TokenBudget>(),
+            sp.GetRequiredService<PromptBuilder>(),
+            sp.GetRequiredService<ILogger<ContextManager>>()));
+
+        // MCP manager
+        services.AddSingleton(sp => new McpManager(
+            sp.GetRequiredService<ILogger<McpManager>>()));
+
+        // Tool registry (shared across agent and subagents)
+        services.AddSingleton<IToolRegistry, ToolRegistry>();
+
+        // Core agent — wired with all optional dependencies
+        services.AddSingleton(sp => new Agent(
+            sp.GetRequiredService<IChatClient>(),
+            sp.GetRequiredService<ILogger<Agent>>(),
+            permissions: sp.GetRequiredService<PermissionManager>(),
+            transcripts: sp.GetRequiredService<TranscriptStore>(),
+            memories: sp.GetRequiredService<MemoryManager>(),
+            contextManager: sp.GetRequiredService<ContextManager>()));
+
+        // Agent service (subagent spawning, worktree isolation)
+        var worktreesDir = Path.Combine(projectDir, "worktrees");
+        services.AddSingleton(sp => new AgentService(
+            sp,
+            sp.GetRequiredService<ILogger<AgentService>>(),
+            sp.GetRequiredService<ILoggerFactory>(),
+            sp.GetRequiredService<IChatClient>(),
+            worktreesDir));
+
+        // Coordinator service (multi-worker orchestration)
+        var coordinatorStateDir = Path.Combine(projectDir, "coordinator");
+        services.AddSingleton(sp => new CoordinatorService(
+            sp.GetRequiredService<AgentService>(),
+            sp.GetRequiredService<TaskManager>(),
+            sp.GetRequiredService<ILogger<CoordinatorService>>(),
+            sp.GetRequiredService<IChatClient>(),
+            coordinatorStateDir));
+
         // Chat service (pure C# — no sidecar)
         services.AddSingleton<HermesChatService>();
 
         var provider = services.BuildServiceProvider();
+
+        // ── Post-build: Register all tools and connect MCP ──
+        RegisterAllTools(provider);
+        InitializeMcpAsync(provider, projectDir);
+
         return provider;
+    }
+
+    /// <summary>
+    /// Register all built-in tools with the Agent after DI is built.
+    /// </summary>
+    private static void RegisterAllTools(IServiceProvider services)
+    {
+        var agent = services.GetRequiredService<Agent>();
+        var toolRegistry = services.GetRequiredService<IToolRegistry>();
+        var httpClient = services.GetRequiredService<HttpClient>();
+        var chatClient = services.GetRequiredService<IChatClient>();
+
+        // File system tools (no constructor dependencies)
+        RegisterAndTrack(agent, toolRegistry, new ReadFileTool());
+        RegisterAndTrack(agent, toolRegistry, new WriteFileTool());
+        RegisterAndTrack(agent, toolRegistry, new EditFileTool());
+        RegisterAndTrack(agent, toolRegistry, new GlobTool());
+        RegisterAndTrack(agent, toolRegistry, new GrepTool());
+
+        // Shell execution tools
+        RegisterAndTrack(agent, toolRegistry, new BashTool());
+        RegisterAndTrack(agent, toolRegistry, new TerminalTool());
+
+        // Web tools
+        RegisterAndTrack(agent, toolRegistry, new WebFetchTool(httpClient));
+        RegisterAndTrack(agent, toolRegistry, new WebSearchTool(
+            new WebSearchConfig { Provider = "duckduckgo" }, httpClient));
+
+        // Task management
+        RegisterAndTrack(agent, toolRegistry, new TodoWriteTool());
+        RegisterAndTrack(agent, toolRegistry, new ScheduleCronTool());
+
+        // LSP tool (optional config)
+        RegisterAndTrack(agent, toolRegistry, new LspTool());
+
+        // Agent tool (subagent spawning — needs chat client and tool registry)
+        RegisterAndTrack(agent, toolRegistry, new AgentTool(chatClient, toolRegistry));
+    }
+
+    /// <summary>Register a tool with both the Agent and the shared IToolRegistry.</summary>
+    private static void RegisterAndTrack(Agent agent, IToolRegistry registry, ITool tool)
+    {
+        agent.RegisterTool(tool);
+        registry.RegisterTool(tool);
+    }
+
+    /// <summary>
+    /// Load MCP server configs and connect (fire-and-forget on startup).
+    /// </summary>
+    private static async void InitializeMcpAsync(IServiceProvider services, string projectDir)
+    {
+        try
+        {
+            var mcpManager = services.GetRequiredService<McpManager>();
+            var agent = services.GetRequiredService<Agent>();
+            var toolRegistry = services.GetRequiredService<IToolRegistry>();
+
+            // Check for MCP config in standard locations
+            var mcpConfigPaths = new[]
+            {
+                Path.Combine(projectDir, "mcp.json"),
+                Path.Combine(HermesEnvironment.HermesHomePath, "mcp.json"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hermes", "mcp.json")
+            };
+
+            foreach (var configPath in mcpConfigPaths)
+            {
+                if (File.Exists(configPath))
+                {
+                    await mcpManager.LoadFromConfigAsync(configPath);
+                }
+            }
+
+            // Connect to all configured servers
+            await mcpManager.ConnectAllAsync();
+
+            // Register discovered MCP tools with the Agent
+            foreach (var mcpTool in mcpManager.Tools.Values)
+            {
+                agent.RegisterTool(mcpTool);
+                toolRegistry.RegisterTool(mcpTool);
+            }
+        }
+        catch (Exception ex)
+        {
+            // MCP initialization is non-critical — log and continue
+            var logger = services.GetRequiredService<ILogger<App>>();
+            logger.LogWarning(ex, "MCP initialization failed, continuing without MCP tools");
+        }
     }
 }

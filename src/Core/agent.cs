@@ -1,6 +1,10 @@
 namespace Hermes.Agent.Core;
 
 using Hermes.Agent.LLM;
+using Hermes.Agent.Permissions;
+using Hermes.Agent.Transcript;
+using Hermes.Agent.Memory;
+using Hermes.Agent.Context;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
@@ -10,13 +14,29 @@ public sealed class Agent : IAgent
     private readonly ILogger<Agent> _logger;
     private readonly Dictionary<string, ITool> _tools = new();
 
+    // Optional subsystem dependencies — Agent works without any of these
+    private readonly PermissionManager? _permissions;
+    private readonly TranscriptStore? _transcripts;
+    private readonly MemoryManager? _memories;
+    private readonly ContextManager? _contextManager;
+
     /// <summary>Safety limit to prevent infinite tool loops.</summary>
     public int MaxToolIterations { get; set; } = 25;
 
-    public Agent(IChatClient chatClient, ILogger<Agent> logger)
+    public Agent(
+        IChatClient chatClient,
+        ILogger<Agent> logger,
+        PermissionManager? permissions = null,
+        TranscriptStore? transcripts = null,
+        MemoryManager? memories = null,
+        ContextManager? contextManager = null)
     {
         _chatClient = chatClient;
         _logger = logger;
+        _permissions = permissions;
+        _transcripts = transcripts;
+        _memories = memories;
+        _contextManager = contextManager;
     }
 
     public void RegisterTool(ITool tool)
@@ -40,19 +60,71 @@ public sealed class Agent : IAgent
 
     /// <summary>
     /// Full chat loop with tool calling. Sends the user message, then iterates:
-    /// LLM responds → if tool calls, execute them → feed results back → repeat
+    /// LLM responds -> if tool calls, execute them -> feed results back -> repeat
     /// until LLM produces a final text response or we hit MaxToolIterations.
     /// </summary>
     public async Task<string> ChatAsync(string message, Session session, CancellationToken ct)
     {
-        session.AddMessage(new Message { Role = "user", Content = message });
+        // ── Memory injection ──
+        // Load relevant memories and inject as a system message at the start
+        if (_memories is not null)
+        {
+            try
+            {
+                var recentTools = _tools.Keys.Take(10).ToList();
+                var relevantMemories = await _memories.LoadRelevantMemoriesAsync(message, recentTools, ct);
+                if (relevantMemories.Count > 0)
+                {
+                    var memoryBlock = string.Join("\n---\n",
+                        relevantMemories.Select(m => $"[{m.Type}] {m.Filename}:\n{m.Content}"));
+                    session.Messages.Insert(0, new Message
+                    {
+                        Role = "system",
+                        Content = $"[Relevant Memories]\n{memoryBlock}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load memories, continuing without them");
+            }
+        }
+
+        // ── Add user message ──
+        var userMessage = new Message { Role = "user", Content = message };
+        session.AddMessage(userMessage);
+        if (_transcripts is not null)
+            await _transcripts.SaveMessageAsync(session.Id, userMessage, ct);
+
         _logger.LogInformation("Processing message for session {SessionId}", session.Id);
+
+        // ── Context manager integration ──
+        // If ContextManager is available, use it to build optimized context instead of raw session.Messages
+        List<Message>? preparedContext = null;
+        if (_contextManager is not null)
+        {
+            try
+            {
+                preparedContext = await _contextManager.PrepareContextAsync(
+                    session.Id, message, retrievedContext: null, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ContextManager failed, falling back to raw session messages");
+            }
+        }
 
         if (_tools.Count == 0)
         {
             // No tools registered — simple completion
-            var response = await _chatClient.CompleteAsync(session.Messages, ct);
-            session.AddMessage(new Message { Role = "assistant", Content = response });
+            var messagesToSend = preparedContext ?? session.Messages;
+            var response = await _chatClient.CompleteAsync(messagesToSend, ct);
+            var assistantMsg = new Message { Role = "assistant", Content = response };
+            session.AddMessage(assistantMsg);
+            if (_transcripts is not null)
+                await _transcripts.SaveMessageAsync(session.Id, assistantMsg, ct);
+            if (_contextManager is not null)
+                await _contextManager.UpdateAfterResponseAsync(session.Id, ct: ct);
             return response;
         }
 
@@ -62,42 +134,109 @@ public sealed class Agent : IAgent
         while (iterations < MaxToolIterations)
         {
             iterations++;
-            var response = await _chatClient.CompleteWithToolsAsync(session.Messages, toolDefs, ct);
+
+            // Use prepared context for first iteration, then fall back to session.Messages
+            // because session.Messages accumulates tool results as the loop progresses
+            var messagesToUse = (iterations == 1 && preparedContext is not null)
+                ? preparedContext
+                : session.Messages;
+
+            var response = await _chatClient.CompleteWithToolsAsync(messagesToUse, toolDefs, ct);
 
             if (!response.HasToolCalls)
             {
                 // LLM is done — return final text
                 var finalContent = response.Content ?? "";
-                session.AddMessage(new Message { Role = "assistant", Content = finalContent });
+                var finalMsg = new Message { Role = "assistant", Content = finalContent };
+                session.AddMessage(finalMsg);
+                if (_transcripts is not null)
+                    await _transcripts.SaveMessageAsync(session.Id, finalMsg, ct);
+                if (_contextManager is not null)
+                    await _contextManager.UpdateAfterResponseAsync(session.Id, ct: ct);
                 return finalContent;
             }
 
             // Record the assistant message with its tool call requests
-            session.AddMessage(new Message
+            var assistantToolMsg = new Message
             {
                 Role = "assistant",
                 Content = response.Content ?? "",
                 ToolCalls = response.ToolCalls
-            });
+            };
+            session.AddMessage(assistantToolMsg);
+            if (_transcripts is not null)
+                await _transcripts.SaveMessageAsync(session.Id, assistantToolMsg, ct);
 
             // Execute each tool call and append results
             foreach (var toolCall in response.ToolCalls!)
             {
+                // ── Permission gate ──
+                if (_permissions is not null)
+                {
+                    try
+                    {
+                        var decision = await _permissions.CheckPermissionsAsync(
+                            toolCall.Name, toolCall.Arguments, ct);
+
+                        if (decision.Behavior == PermissionBehavior.Deny)
+                        {
+                            var denialMsg = new Message
+                            {
+                                Role = "tool",
+                                Content = $"Permission denied: {decision.DecisionReason ?? decision.Message ?? "Blocked by permission rule"}",
+                                ToolCallId = toolCall.Id,
+                                ToolName = toolCall.Name
+                            };
+                            session.AddMessage(denialMsg);
+                            if (_transcripts is not null)
+                                await _transcripts.SaveMessageAsync(session.Id, denialMsg, ct);
+                            continue;
+                        }
+
+                        if (decision.Behavior == PermissionBehavior.Ask)
+                        {
+                            // For now, treat "ask" as deny with explanation
+                            // In the future, this would prompt the user via UI
+                            var askMsg = new Message
+                            {
+                                Role = "tool",
+                                Content = $"Permission required (user approval needed): {decision.Message ?? "This operation requires permission"}",
+                                ToolCallId = toolCall.Id,
+                                ToolName = toolCall.Name
+                            };
+                            session.AddMessage(askMsg);
+                            if (_transcripts is not null)
+                                await _transcripts.SaveMessageAsync(session.Id, askMsg, ct);
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Permission check failed for {ToolName}, allowing execution", toolCall.Name);
+                    }
+                }
+
                 _logger.LogInformation("Executing tool {ToolName} (call {CallId})", toolCall.Name, toolCall.Id);
                 var result = await ExecuteToolCallAsync(toolCall, ct);
-                session.AddMessage(new Message
+                var toolResultMsg = new Message
                 {
                     Role = "tool",
                     Content = result.Content,
                     ToolCallId = toolCall.Id,
                     ToolName = toolCall.Name
-                });
+                };
+                session.AddMessage(toolResultMsg);
+                if (_transcripts is not null)
+                    await _transcripts.SaveMessageAsync(session.Id, toolResultMsg, ct);
             }
         }
 
         _logger.LogWarning("Hit max tool iterations ({Max}) for session {SessionId}", MaxToolIterations, session.Id);
         var fallback = "I've reached the maximum number of tool call iterations. Here's what I've accomplished so far based on the conversation above.";
-        session.AddMessage(new Message { Role = "assistant", Content = fallback });
+        var fallbackMsg = new Message { Role = "assistant", Content = fallback };
+        session.AddMessage(fallbackMsg);
+        if (_transcripts is not null)
+            await _transcripts.SaveMessageAsync(session.Id, fallbackMsg, ct);
         return fallback;
     }
 
