@@ -1,14 +1,14 @@
 # Session Management, Crash Recovery & Context Switching
 
-**Source**: Claude Code leaked source analysis  
-**Date**: 2026-04-03  
+**Source**: Reference architecture analysis
+**Date**: 2026-04-03
 **Purpose**: Capture session persistence, crash recovery, and lossless context switching for Hermes.C#
 
 ---
 
 ## 🎯 Core Systems Overview
 
-Claude Code has **5 critical systems** for handling power loss, session switching, and context persistence:
+Modern agentic systems use **5 critical systems** for handling power loss, session switching, and context persistence:
 
 1. **Transcript Persistence** - Every message saved to disk before API call
 2. **Session History** - JSONL history for resume/replay
@@ -39,7 +39,7 @@ async function submitMessage(userMessage: string) {
   if (isBareMode()) {
     // Fire-and-forget (saves ~4ms on SSD)
     saveToTranscript(mutableMessages);
-  } else if (CLAUDE_CODE_EAGER_FLUSH || CLAUDE_CODE_IS_COWORK) {
+  } else if (HERMES_EAGER_FLUSH || HERMES_IS_COWORK) {
     // Awaited + flushed
     await saveToTranscript(mutableMessages);
     await fs.flush();

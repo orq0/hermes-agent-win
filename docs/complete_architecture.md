@@ -7,7 +7,7 @@
 
 ---
 
-## 🎯 The 9 Pillars (Claude Code Differentiators)
+## The 9 Architectural Pillars
 
 | # | Pillar | Status | Priority |
 |---|--------|--------|----------|
@@ -145,7 +145,7 @@ Hermes.CS/
 ├── docs/
 │   ├── README.md                    # ✅ Project overview
 │   ├── TOOLS_STATUS.md              # ✅ Tool implementation status
-│   ├── CLAUDE_CODE_DEEP_DIVE.md     # ✅ Tool system analysis
+│   ├── AGENT_ARCHITECTURE_DEEP_DIVE.md  # ✅ Tool system analysis
 │   ├── SESSION_MANAGEMENT.md        # ✅ Session/crash recovery
 │   └── KAIROS_AND_MULTIAGENT.md     # ✅ KAIROS + multi-agent
 │
@@ -669,7 +669,7 @@ public sealed class TranscriptStore
     private bool ShouldEagerFlush()
     {
         // Eager flush in these cases:
-        // 1. CLAUDE_CODE_EAGER_FLUSH env var set
+        // 1. HERMES_EAGER_FLUSH env var set
         // 2. Running in Cowork (cloud) mode
         // 3. Bare mode (--bare flag) - fire-and-forget, no flush
         return Environment.GetEnvironmentVariable("HERMES_EAGER_FLUSH") != null;
@@ -921,7 +921,7 @@ public enum PermissionBehavior
 3. **Implement MemoryManager** - First differentiator
 4. **Implement AgentService** - Enable multi-agent
 
-Once these 4 are done, Hermes.C# will have capabilities NO other agent has except Claude Code.
+Once these 4 are done, Hermes.C# will have capabilities matching modern agentic systems.
 
 ---
 

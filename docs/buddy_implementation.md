@@ -41,7 +41,7 @@ var rarityRoll = rng();  // 0.0 to 1.0
 var speciesIndex = (int)(rng() * pool.Length);
 ```
 
-This is the same algorithm Claude Code uses. Deterministic, reproducible, fair.
+This is the same algorithm used in modern agentic systems. Deterministic, reproducible, fair.
 
 ---
 

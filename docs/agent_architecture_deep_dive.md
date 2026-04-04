@@ -1,7 +1,7 @@
-# Claude Code Deep Dive - Key Learnings for Hermes.C#
+# Agent Architecture Deep Dive - Key Learnings for Hermes.C#
 
-**Source**: `C:\ClaudeCode\` - Clean-room Rust reimplementation spec & leaked TypeScript source  
-**Date**: 2026-04-03  
+**Source**: Reference architecture analysis
+**Date**: 2026-04-03
 **Purpose**: Capture critical implementation details for Hermes.C# tools
 
 ---
@@ -288,7 +288,7 @@ type GrepToolInput = {
 }
 ```
 
-**Built on ripgrep** - all Claude Code users have `rg` pre-installed
+**Built on ripgrep** - modern agentic systems typically bundle `rg`
 
 ---
 
@@ -501,7 +501,7 @@ else if (elapsedMs > PROGRESS_THRESHOLD_MS)
 ## 🔒 Security Considerations
 
 ### Windows Sandbox Limitation
-Claude Code has **no sandbox on Windows** - this is a known limitation. Options for Hermes.C#:
+The reference architecture has **no sandbox on Windows** - this is a known limitation. Options for Hermes.C#:
 1. **Windows Job Objects** - Process isolation, resource limits
 2. **AppContainer** - Windows Store app sandboxing (complex)
 3. **Hyper-V containers** - Heavy but secure
@@ -516,17 +516,17 @@ Without OS-level sandboxing, the permission system becomes the primary security 
 
 ---
 
-## 📚 Source Files to Study
+## Reference Materials
 
-### Must Read
-- `C:\ClaudeCode\spec\03_tools.md` - Complete tool specifications
-- `C:\ClaudeCode\spec\05_components_agents_permissions_design.md` - Permission UI design
-- `C:\ClaudeCode\spec\12_constants_types.md` - Type definitions
+### Core Specifications
+- Tool system design - Complete tool specifications
+- Components, agents, and permissions design - Permission UI design
+- Constants and type definitions
 
-### Reference
-- `C:\ClaudeCode\spec\01_core_entry_query.md` - Core architecture
-- `C:\ClaudeCode\spec\06_services_context_state.md` - State management
-- `C:\ClaudeCode\spec\13_rust_codebase.md` - Rust implementation notes
+### Architecture Reference
+- Core entry and query pipeline
+- Services, context, and state management
+- Implementation notes
 
 ---
 

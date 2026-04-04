@@ -1,7 +1,7 @@
 # KAIROS & Multi-Agent Systems Deep Dive
 
-**Source**: Claude Code leaked source analysis  
-**Date**: 2026-04-03  
+**Source**: Reference architecture analysis
+**Date**: 2026-04-03
 **Purpose**: Complete specification of KAIROS proactive mode and multi-agent orchestration for Hermes.C#
 
 ---
@@ -208,7 +208,7 @@ type BriefToolInput = {
 
 ### Agent Types
 
-Claude Code has **4 agent roles**:
+The reference architecture defines **4 agent roles**:
 
 | Role | Description | Spawned By |
 |------|-------------|------------|
@@ -425,7 +425,7 @@ type SendMessageInput = {
 
 ### What is Coordinator Mode?
 
-**Coordinator mode** is where Claude Code orchestrates multiple parallel workers:
+**Coordinator mode** is where the agent orchestrates multiple parallel workers:
 
 ```
 ┌─────────────────┐
@@ -445,7 +445,7 @@ type SendMessageInput = {
 
 ```typescript
 // Env var + feature flag
-CLAUDE_CODE_COORDINATOR_MODE=true
+HERMES_COORDINATOR_MODE=true
 feature('COORDINATOR_MODE')  // GrowthBook flag
 ```
 
@@ -526,9 +526,9 @@ function matchSessionMode(
   if (currentMode !== sessionMode) {
     // Switch mode to match session
     if (sessionMode === 'coordinator') {
-      process.env.CLAUDE_CODE_COORDINATOR_MODE = 'true';
+      process.env.HERMES_COORDINATOR_MODE = 'true';
     } else {
-      delete process.env.CLAUDE_CODE_COORDINATOR_MODE;
+      delete process.env.HERMES_COORDINATOR_MODE;
     }
     
     // Log analytics
