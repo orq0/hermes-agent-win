@@ -148,15 +148,43 @@ public sealed partial class ChatPage : Page
 
         try
         {
-            // Task.Run prevents UI thread deadlock with HttpClient async
-            var reply = await Task.Run(() => _chatService.SendAsync(prompt, CancellationToken.None));
+            // Create the assistant message bubble immediately (empty)
+            var assistantItem = AddMessage(
+                ResourceLoader.GetString("ChatAssistantLabel"), "",
+                HorizontalAlignment.Left,
+                _assistantBackgroundBrush, _assistantBorderBrush, _secondaryLabelBrush);
+            assistantItem.IsStreaming = true;
+            ShowThinking(false); // Hide thinking as soon as first content arrives
 
-            ShowThinking(false);
+            // Stream tokens into the bubble
+            var hasContent = false;
+            await foreach (var token in _chatService.StreamAsync(prompt, CancellationToken.None))
+            {
+                if (!hasContent)
+                {
+                    hasContent = true;
+                    ShowThinking(false);
+                }
+                assistantItem.AppendToken(token);
+            }
 
-            if (string.IsNullOrWhiteSpace(reply.Response))
-                AppendSystemMessage("LLM returned an empty response.");
-            else
-                AppendAssistantMessage(reply.Response);
+            assistantItem.IsStreaming = false;
+
+            if (!hasContent)
+            {
+                // Stream produced nothing — fall back to blocking send
+                Messages.Remove(assistantItem);
+                var reply = await Task.Run(() => _chatService.SendAsync(prompt, CancellationToken.None));
+                ShowThinking(false);
+                if (!string.IsNullOrWhiteSpace(reply.Response))
+                    AppendAssistantMessage(reply.Response);
+                else
+                    AppendSystemMessage("LLM returned an empty response.");
+            }
+
+            // Scroll to the final message
+            if (Messages.Count > 0)
+                MessagesList.ScrollIntoView(Messages[^1]);
 
             ConnectionStateText.Text = "Connected";
         }
@@ -222,8 +250,9 @@ public sealed partial class ChatPage : Page
 
     private void ShowThinking(bool show)
     {
-        ThinkingIndicator.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (show) MessagesList.ScrollIntoView(Messages.Count > 0 ? Messages[^1] : null);
+        ThinkingIndicator.Opacity = show ? 1.0 : 0.0;
+        ThinkingRing.IsActive = show;
+        // Don't scroll here — let AddMessage handle it once
     }
 
     private void AppendUserMessage(string text) =>

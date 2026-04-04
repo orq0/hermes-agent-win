@@ -47,7 +47,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="1" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -70,11 +70,11 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <!-- Thinking indicator (shown while waiting for LLM) -->
-                <Border Grid.Row="2" x:Name="ThinkingIndicator" Visibility="Collapsed"
-                        Padding="18,8" Background="Transparent">
+                <!-- Thinking indicator — uses Opacity to avoid layout shift -->
+                <Border Grid.Row="2" x:Name="ThinkingIndicator" Opacity="0"
+                        Padding="18,8" Background="Transparent" Height="36">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ProgressRing IsActive="True" Width="16" Height="16"
+                        <ProgressRing x:Name="ThinkingRing" IsActive="False" Width="16" Height="16"
                                       Foreground="{StaticResource AppAccentBrush}"/>
                         <TextBlock x:Name="ThinkingText" Text="Hermes is thinking..."
                                    FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}"
