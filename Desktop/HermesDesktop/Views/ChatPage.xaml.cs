@@ -424,37 +424,38 @@ public sealed partial class ChatPage : Page
 
     private void ShowOnboarding()
     {
-        _onboarding = OnboardingState.AwaitingSoulInput;
+        // Don't use chat-based onboarding — point to the Agent tab instead
+        _onboarding = OnboardingState.None;
 
-        var welcome =
-            "            ⠀⠀⠀⢀⣀⡀⠀⣀⣀⠀⢀⣀⡀\n" +
-            "            ⢀⣠⣴⣾⣿⣿⣇⠸⣿⣿⠇⣸⣿⣿⣷⣦⣄⡀\n" +
-            "       ⢀⣠⣴⣶⠿⠋⣩⡿⣿⡿⠻⣿⡇⢠⡄⢸⣿⠟⢿⣿⢿⣍⠙⠿⣶⣦⣄⡀\n" +
-            "       ⠀⠉⠉⠁⠶⠟⠋⠀⠉⠀⢀⣈⣁⡈⢁⣈⣁⡀⠀⠉⠀⠙⠻⠶⠈⠉⠉\n" +
-            "            ⠀⠀⠀⠀⠀⠀⣴⣿⡿⠛⢁⡈⠛⢿⣿⣦\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠿⣿⣦⣤⣈⠁⢠⣴⣿⠿\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⠈⠉⠻⢿⣿⣦⡉⠁\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⠀⠘⢷⣦⣈⠛⠃\n" +
-            "            ⠀⠀⠀⠀⠀⠀⢠⣴⠦⠈⠙⠿⣦⡄\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠸⣿⣤⡈⠁⢤⣿⠇\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠷⠄\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⢀⣀⠑⢶⣄⡀\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⣿⠁⢰⡆⠈⡿\n" +
-            "            ⠀⠀⠀⠀⠀⠀⠀⠈⠳⠈⣡⠞⠁\n\n" +
-            "         H E R M E S   A G E N T\n\n" +
-            "         First Run Setup";
-
-        AppendSystemMessage(welcome);
-
+        AppendWelcomeMessage();
         AppendAssistantMessage(
-            "Hello. I'm Hermes — your AI agent.\n\n" +
-            "Before we begin, I'd like to know who I should be for you. " +
-            "Every AI agent has a soul document — it defines my personality, values, and how I work with you.\n\n" +
-            "I have a default identity, but you can shape it. Tell me:\n\n" +
-            "  - What kind of agent do you want? (direct? creative? technical? casual?)\n" +
-            "  - What should I prioritize? (speed? accuracy? asking before acting?)\n" +
-            "  - Any personality traits you want or don't want?\n\n" +
-            "Or just say \"default\" to keep my current soul and move on.");
+            "Welcome! This is your first time here.\n\n" +
+            "I'm Hermes — your AI agent. Before we start, you can set up my identity " +
+            "and tell me about yourself.\n\n" +
+            "Click the Agent tab in the right panel to:\n" +
+            "  - Browse soul templates (12 different personalities)\n" +
+            "  - Customize my identity, values, and working style\n" +
+            "  - Tell me about you so I can be a better assistant\n" +
+            "  - Create multiple agent configurations\n\n" +
+            "Or just start chatting — I work great with my default soul too.");
+
+        // Mark as configured so onboarding doesn't repeat
+        _ = MarkConfiguredAsync();
+    }
+
+    private async System.Threading.Tasks.Task MarkConfiguredAsync()
+    {
+        try
+        {
+            var current = await _soulService.LoadFileAsync(SoulFileType.Soul);
+            if (current.Contains("<!-- UNCONFIGURED -->"))
+                await _soulService.SaveFileAsync(SoulFileType.Soul, current.Replace("<!-- UNCONFIGURED -->\n", ""));
+
+            var userCurrent = await _soulService.LoadFileAsync(SoulFileType.User);
+            if (userCurrent.Contains("<!-- UNCONFIGURED -->"))
+                await _soulService.SaveFileAsync(SoulFileType.User, userCurrent.Replace("<!-- UNCONFIGURED -->\n", ""));
+        }
+        catch { /* non-critical */ }
     }
 
     private async Task HandleOnboardingInputAsync(string input)
@@ -659,6 +660,7 @@ Write the USER.md content now (markdown format, start with # User Profile):";
         FileBrowserPanelView.Visibility = Visibility.Collapsed;
         SkillsPanelView.Visibility = Visibility.Collapsed;
         MemoryPanelView.Visibility = Visibility.Collapsed;
+        AgentPanelView.Visibility = Visibility.Collapsed;
         TaskPanelView.Visibility = Visibility.Collapsed;
         BuddyPanelView.Visibility = Visibility.Collapsed;
         ReplayPanelView.Visibility = Visibility.Collapsed;
@@ -669,6 +671,7 @@ Write the USER.md content now (markdown format, start with # User Profile):";
         TabFiles.Foreground = muted;
         TabSkills.Foreground = muted;
         TabMemory.Foreground = muted;
+        TabAgent.Foreground = muted;
         TabTasks.Foreground = muted;
         TabBuddy.Foreground = muted;
         TabReplay.Foreground = muted;
@@ -679,6 +682,7 @@ Write the USER.md content now (markdown format, start with # User Profile):";
             case "files": FileBrowserPanelView.Visibility = Visibility.Visible; TabFiles.Foreground = accent; break;
             case "skills": SkillsPanelView.Visibility = Visibility.Visible; TabSkills.Foreground = accent; break;
             case "memory": MemoryPanelView.Visibility = Visibility.Visible; TabMemory.Foreground = accent; break;
+            case "agent": AgentPanelView.Visibility = Visibility.Visible; TabAgent.Foreground = accent; break;
             case "tasks": TaskPanelView.Visibility = Visibility.Visible; TabTasks.Foreground = accent; break;
             case "buddy": BuddyPanelView.Visibility = Visibility.Visible; TabBuddy.Foreground = accent; break;
             case "replay": ReplayPanelView.Visibility = Visibility.Visible; TabReplay.Foreground = accent; break;
