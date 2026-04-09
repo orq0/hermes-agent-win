@@ -67,6 +67,13 @@ public sealed class OpenAiClient : IChatClient
         if (msg.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.String)
             content = contentEl.GetString();
 
+        // Fallback: reasoning models (MiniMax, DeepSeek-R1, etc.) may put text in "reasoning" with empty "content"
+        if (string.IsNullOrEmpty(content) &&
+            msg.TryGetProperty("reasoning", out var reasoningEl) && reasoningEl.ValueKind == JsonValueKind.String)
+        {
+            content = reasoningEl.GetString();
+        }
+
         List<ToolCall>? toolCalls = null;
         if (msg.TryGetProperty("tool_calls", out var toolCallsEl) && toolCallsEl.ValueKind == JsonValueKind.Array)
         {
@@ -99,32 +106,87 @@ public sealed class OpenAiClient : IChatClient
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-
-        while (!ct.IsCancellationRequested)
+        HttpResponseMessage? response = null;
+        string? connectionError = null;
+        try
         {
-            var line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
-            if (!line.StartsWith("data: ")) continue;
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            response?.Dispose();
+            response = null;
+            connectionError = $"\n[Connection error: {ex.Message}]";
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            response?.Dispose();
+            response = null;
+            connectionError = "\n[Request timed out — the LLM server may be overloaded or unreachable]";
+        }
 
-            var data = line["data: ".Length..];
-            if (data == "[DONE]") break;
+        if (connectionError is not null)
+        {
+            yield return connectionError;
+            yield break;
+        }
 
-            using var chunk = JsonDocument.Parse(data);
-            var choices = chunk.RootElement.GetProperty("choices");
-            if (choices.GetArrayLength() == 0) continue;
+        using (response!)
+        {
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var reader = new StreamReader(stream);
 
-            var delta = choices[0].GetProperty("delta");
-            if (delta.TryGetProperty("content", out var contentEl) &&
-                contentEl.ValueKind == JsonValueKind.String)
+            while (!ct.IsCancellationRequested)
             {
-                var token = contentEl.GetString();
-                if (!string.IsNullOrEmpty(token))
-                    yield return token;
+                string? line;
+                string? readError = null;
+                try
+                {
+                    line = await reader.ReadLineAsync(ct);
+                }
+                catch (IOException)
+                {
+                    readError = "\n[Connection lost during streaming]";
+                    line = null;
+                }
+
+                if (readError is not null)
+                {
+                    yield return readError;
+                    yield break;
+                }
+
+                if (line is null) break;
+                if (!line.StartsWith("data: ")) continue;
+
+                var data = line["data: ".Length..];
+                if (data == "[DONE]") break;
+
+                JsonDocument? chunk;
+                try
+                {
+                    chunk = JsonDocument.Parse(data);
+                }
+                catch (JsonException)
+                {
+                    continue; // Skip malformed chunks
+                }
+
+                using (chunk)
+                {
+                    if (!chunk.RootElement.TryGetProperty("choices", out var choices) ||
+                        choices.GetArrayLength() == 0) continue;
+
+                    var delta = choices[0].GetProperty("delta");
+                    if (delta.TryGetProperty("content", out var contentEl) &&
+                        contentEl.ValueKind == JsonValueKind.String)
+                    {
+                        var token = contentEl.GetString();
+                        if (!string.IsNullOrEmpty(token))
+                            yield return token;
+                    }
+                }
             }
         }
     }
@@ -201,10 +263,19 @@ public sealed class OpenAiClient : IChatClient
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var response = await _httpClient.SendAsync(request, ct);
+
+                // INV-004/005: Mark credential failed on auth or rate-limit errors and rotate
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
                     response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    _credentialPool.MarkFailed(apiKey);
+                    _credentialPool.MarkFailed(apiKey, (int)response.StatusCode, "auth_error");
+                    response.Dispose();
+                    continue; // Retry with next key
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    _credentialPool.MarkFailed(apiKey, 429, "rate_limited");
                     response.Dispose();
                     continue; // Retry with next key
                 }
@@ -227,11 +298,173 @@ public sealed class OpenAiClient : IChatClient
         IEnumerable<ToolDefinition>? tools = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Delegate to string streaming, wrapping tokens as StreamEvents
-        await foreach (var token in StreamAsync(messages.ToList(), ct))
+        // Direct SSE parsing that handles both:
+        // 1. <think>...</think> tags in content (QwQ, DeepSeek-R1 via Ollama)
+        // 2. Separate "reasoning" JSON field (MiniMax-M2.7, etc.)
+        var inThinkBlock = false;
+        var contentBuffer = new StringBuilder();
+
+        var payload = BuildPayload(messages, tools: null, stream: true);
+        var json = JsonSerializer.Serialize(payload);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_config.BaseUrl}/chat/completions")
         {
-            yield return new StreamEvent.TokenDelta(token);
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+
+        HttpResponseMessage? response = null;
+        Exception? connectError = null;
+        try
+        {
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
         }
+        catch (HttpRequestException ex) { response?.Dispose(); connectError = ex; }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        { response?.Dispose(); connectError = new TimeoutException("Request timed out"); }
+
+        if (connectError is not null)
+        {
+            yield return new StreamEvent.StreamError(connectError);
+            yield break;
+        }
+
+        using (response!)
+        {
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var reader = new StreamReader(stream);
+
+            while (!ct.IsCancellationRequested)
+            {
+                string? line;
+                IOException? ioError = null;
+                try { line = await reader.ReadLineAsync(ct); }
+                catch (IOException ioEx) { line = null; ioError = ioEx; }
+
+                if (ioError is not null)
+                {
+                    yield return new StreamEvent.StreamError(ioError);
+                    yield break;
+                }
+
+                if (line is null) break;
+                if (!line.StartsWith("data: ")) continue;
+                var data = line["data: ".Length..];
+                if (data == "[DONE]") break;
+
+                JsonDocument? chunk;
+                try { chunk = JsonDocument.Parse(data); }
+                catch (JsonException) { continue; }
+
+                using (chunk)
+                {
+                    if (!chunk.RootElement.TryGetProperty("choices", out var choices) ||
+                        choices.GetArrayLength() == 0) continue;
+
+                    var delta = choices[0].GetProperty("delta");
+
+                    // Extract reasoning field (MiniMax, DeepSeek-R1 JSON format)
+                    if (delta.TryGetProperty("reasoning", out var reasoningEl) &&
+                        reasoningEl.ValueKind == JsonValueKind.String)
+                    {
+                        var reasoning = reasoningEl.GetString();
+                        if (!string.IsNullOrEmpty(reasoning))
+                            yield return new StreamEvent.ThinkingDelta(reasoning);
+                    }
+
+                    // Extract content field
+                    if (delta.TryGetProperty("content", out var contentEl) &&
+                        contentEl.ValueKind == JsonValueKind.String)
+                    {
+                        var token = contentEl.GetString();
+                        if (!string.IsNullOrEmpty(token))
+                        {
+                            // Handle <think>...</think> tags within content
+                            contentBuffer.Append(token);
+
+                            while (contentBuffer.Length > 0)
+                            {
+                                var text = contentBuffer.ToString();
+
+                                if (!inThinkBlock)
+                                {
+                                    var openIdx = text.IndexOf("<think>");
+                                    if (openIdx >= 0)
+                                    {
+                                        if (openIdx > 0)
+                                            yield return new StreamEvent.TokenDelta(text[..openIdx]);
+                                        inThinkBlock = true;
+                                        contentBuffer.Clear();
+                                        contentBuffer.Append(text[(openIdx + "<think>".Length)..]);
+                                        continue;
+                                    }
+
+                                    // Check for partial <think> tag at end
+                                    if (text.Length > 0 && (text[^1] == '<' || text.EndsWith("<t") ||
+                                        text.EndsWith("<th") || text.EndsWith("<thi") ||
+                                        text.EndsWith("<thin") || text.EndsWith("<think")))
+                                    {
+                                        var ps = text.LastIndexOf('<');
+                                        if (ps >= 0 && ps < text.Length)
+                                        {
+                                            if (ps > 0) yield return new StreamEvent.TokenDelta(text[..ps]);
+                                            contentBuffer.Clear();
+                                            contentBuffer.Append(text[ps..]);
+                                            break;
+                                        }
+                                    }
+
+                                    yield return new StreamEvent.TokenDelta(text);
+                                    contentBuffer.Clear();
+                                }
+                                else
+                                {
+                                    var closeIdx = text.IndexOf("</think>");
+                                    if (closeIdx >= 0)
+                                    {
+                                        if (closeIdx > 0)
+                                            yield return new StreamEvent.ThinkingDelta(text[..closeIdx]);
+                                        inThinkBlock = false;
+                                        contentBuffer.Clear();
+                                        contentBuffer.Append(text[(closeIdx + "</think>".Length)..]);
+                                        continue;
+                                    }
+
+                                    if (text.EndsWith("<") || text.EndsWith("</") || text.EndsWith("</t") ||
+                                        text.EndsWith("</th") || text.EndsWith("</thi") ||
+                                        text.EndsWith("</thin") || text.EndsWith("</think"))
+                                    {
+                                        var ps = text.LastIndexOf('<');
+                                        if (ps > 0)
+                                        {
+                                            yield return new StreamEvent.ThinkingDelta(text[..ps]);
+                                            contentBuffer.Clear();
+                                            contentBuffer.Append(text[ps..]);
+                                            break;
+                                        }
+                                        break;
+                                    }
+
+                                    yield return new StreamEvent.ThinkingDelta(text);
+                                    contentBuffer.Clear();
+                                }
+
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Flush remaining content buffer
+        if (contentBuffer.Length > 0)
+        {
+            var remaining = contentBuffer.ToString();
+            yield return inThinkBlock
+                ? new StreamEvent.ThinkingDelta(remaining)
+                : new StreamEvent.TokenDelta(remaining);
+        }
+
         yield return new StreamEvent.MessageComplete("stop", new UsageStats(0, 0));
     }
 }

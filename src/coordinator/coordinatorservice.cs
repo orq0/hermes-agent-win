@@ -1,6 +1,7 @@
 namespace Hermes.Agent.Coordinator;
 
 using Hermes.Agent.Agents;
+using Hermes.Agent.Briefs;
 using Hermes.Agent.Core;
 using Hermes.Agent.LLM;
 using Hermes.Agent.Tasks;
@@ -11,6 +12,7 @@ using System.Text.Json;
 /// <summary>
 /// Coordinator Mode - Multi-worker orchestration engine.
 /// Breaks complex tasks into subtasks, spawns workers in parallel, monitors, synthesizes.
+/// When a TaskBrief is provided, uses its explicit structure instead of LLM decomposition.
 /// </summary>
 public sealed class CoordinatorService
 {
@@ -19,6 +21,7 @@ public sealed class CoordinatorService
     private readonly ILogger<CoordinatorService> _logger;
     private readonly IChatClient _chatClient;
     private readonly string _stateDir;
+    private BriefService? _briefService;
 
     public CoordinatorService(
         AgentService agentService,
@@ -34,6 +37,11 @@ public sealed class CoordinatorService
         _stateDir = stateDir;
         Directory.CreateDirectory(stateDir);
     }
+
+    /// <summary>
+    /// Attach a BriefService for brief-driven orchestration.
+    /// </summary>
+    public void SetBriefService(BriefService briefService) => _briefService = briefService;
 
     public bool IsCoordinatorMode() =>
         Environment.GetEnvironmentVariable("HERMES_COORDINATOR_MODE") == "true";
@@ -164,6 +172,165 @@ public sealed class CoordinatorService
                 Status = "failed",
                 Output = $"Coordination failed: {ex.Message}",
                 SubtaskResults = state.WorkerResults.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.Output ?? "")
+            };
+        }
+    }
+
+    // ── Brief-Driven Orchestration ──
+
+    /// <summary>
+    /// Execute a task using an approved TaskBrief. Instead of LLM decomposition,
+    /// the brief's explicit agent configuration drives spawning.
+    /// This is the preferred path for local/open-source models.
+    /// </summary>
+    public async Task<CoordinationResult> RunBriefAsync(TaskBrief brief, CancellationToken ct)
+    {
+        if (_briefService is null)
+            throw new InvalidOperationException("BriefService not configured. Call SetBriefService first.");
+
+        if (brief.Status != BriefStatus.Approved)
+            throw new InvalidOperationException($"Brief {brief.Id} is not approved (status: {brief.Status})");
+
+        var coordinationId = $"coord_{Guid.NewGuid():N}"[..20];
+        _logger.LogInformation("Starting brief-driven task {CoordId} for brief {BriefId}: {Title}",
+            coordinationId, brief.Id, brief.Title);
+
+        TaskResult? taskResult = null;
+        CoordinationState? state = null;
+
+        try
+        {
+            // Mark brief as in-progress
+            await _briefService.UpdateBriefAsync(brief.Id, b => b.Status = BriefStatus.InProgress, ct);
+
+            // Create linked task in TaskManager
+            taskResult = await _taskManager.CreateTaskAsync(new TaskCreateRequest
+            {
+                Description = $"[{brief.Id}] {brief.Title}",
+                Priority = TaskPriority.High,
+                SuccessCriteria = brief.VerifyChecklist.Count > 0
+                    ? string.Join("; ", brief.VerifyChecklist)
+                    : brief.Objective
+            }, ct);
+            await _briefService.UpdateBriefAsync(brief.Id, b => b.LinkedTaskId = taskResult.TaskId, ct);
+
+            state = new CoordinationState
+            {
+                CoordinationId = coordinationId,
+                OriginalTask = _briefService.BuildCoordinatorPrompt(brief),
+                Phase = TaskWorkflowPhase.Implementation,
+                StartedAt = DateTime.UtcNow
+            };
+            await SaveStateAsync(state, ct);
+            // Spawn agents per brief configuration (no LLM decomposition needed)
+            var workerResults = new Dictionary<int, string>();
+
+            for (var i = 0; i < brief.AgentCount; i++)
+            {
+                var role = i < brief.AgentRoles.Count ? brief.AgentRoles[i] : $"worker-{i + 1}";
+                var agentPrompt = _briefService.BuildAgentPrompt(brief, role, i);
+
+                // Pass prior agent results as context for sequential dependencies
+                var contextFromPrior = "";
+                if (workerResults.Count > 0)
+                {
+                    contextFromPrior = "\n\n## CONTEXT FROM PRIOR AGENTS:\n" +
+                        string.Join("\n---\n", workerResults.Select(kv =>
+                            $"Agent {kv.Key + 1} output:\n{kv.Value}"));
+                }
+
+                _logger.LogInformation("Spawning agent {Index}/{Total} role={Role} for brief {BriefId}",
+                    i + 1, brief.AgentCount, role, brief.Id);
+
+                var result = await _agentService.SpawnAgentAsync(new AgentRequest
+                {
+                    Description = $"[{brief.Id}] {role}",
+                    Prompt = agentPrompt + contextFromPrior,
+                    RunInBackground = false
+                }, ct);
+
+                workerResults[i] = result.Output ?? result.Error ?? "No output";
+                state.WorkerResults[i] = result;
+                await SaveStateAsync(state, ct);
+            }
+
+            // Synthesize results — use AgentCount (not AgentRoles) to include fallback workers
+            var finalOutput = workerResults.Count == 1
+                ? workerResults[0]
+                : await SynthesizeResultsAsync(brief.Objective,
+                    Enumerable.Range(0, brief.AgentCount).Select(i =>
+                    {
+                        var role = i < brief.AgentRoles.Count ? brief.AgentRoles[i] : $"worker-{i + 1}";
+                        return new Subtask
+                        {
+                            Index = i,
+                            Description = role,
+                            SuccessCriteria = brief.Objective
+                        };
+                    }).ToList(),
+                    workerResults, ct);
+
+            // Verify output against brief's criteria
+            state.Phase = TaskWorkflowPhase.Verification;
+            var verification = await _briefService.VerifyOutputAsync(brief, finalOutput, ct);
+
+            if (verification.RequiresManualReview)
+            {
+                // Manual review — mark brief as blocked (pending review), don't fail the task
+                await _briefService.UpdateBriefAsync(brief.Id, b => b.Status = BriefStatus.Blocked, ct);
+                _logger.LogInformation("Brief {BriefId} awaiting manual review by {EscalateTo}",
+                    brief.Id, brief.EscalateTo ?? "user");
+            }
+            else if (verification.Passed)
+            {
+                await _briefService.UpdateBriefAsync(brief.Id, b => b.Status = BriefStatus.Completed, ct);
+                await _taskManager.CompleteTaskAsync(taskResult.TaskId, ct);
+                _logger.LogInformation("Brief {BriefId} completed and verified: {Details}", brief.Id, verification.Details);
+            }
+            else
+            {
+                await _briefService.UpdateBriefAsync(brief.Id, b => b.Status = BriefStatus.Failed, ct);
+                await _taskManager.FailTaskAsync(taskResult.TaskId, $"Verification failed: {verification.Details}", ct);
+                _logger.LogWarning("Brief {BriefId} verification failed: {Details}", brief.Id, verification.Details);
+            }
+
+            state.CompletedAt = DateTime.UtcNow;
+            await SaveStateAsync(state, ct);
+
+            return new CoordinationResult
+            {
+                CoordinationId = coordinationId,
+                Status = verification.RequiresManualReview ? "awaiting_review"
+                    : verification.Passed ? "completed" : "verification_failed",
+                Output = finalOutput,
+                SubtaskResults = workerResults.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Brief {BriefId} execution failed", brief.Id);
+            // Use CancellationToken.None — ct may be cancelled, and cleanup must persist
+            await _briefService.UpdateBriefAsync(brief.Id, b => b.Status = BriefStatus.Failed, CancellationToken.None);
+            if (taskResult is not null)
+                await _taskManager.FailTaskAsync(taskResult.TaskId, ex.Message, CancellationToken.None);
+
+            // Escalate if configured
+            if (!string.IsNullOrWhiteSpace(brief.EscalateTo))
+                _logger.LogWarning("ESCALATION: Brief {BriefId} failed — notify {EscalateTo}: {Error}",
+                    brief.Id, brief.EscalateTo, ex.Message);
+
+            if (state is not null)
+            {
+                state.Error = ex.Message;
+                await SaveStateAsync(state, CancellationToken.None);
+            }
+
+            return new CoordinationResult
+            {
+                CoordinationId = coordinationId,
+                Status = "failed",
+                Output = $"Brief execution failed: {ex.Message}",
+                SubtaskResults = state?.WorkerResults.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.Output ?? "") ?? new()
             };
         }
     }

@@ -13,6 +13,8 @@ using Hermes.Agent.Context;
 using Hermes.Agent.Agents;
 using Hermes.Agent.Coordinator;
 using Hermes.Agent.Mcp;
+using Hermes.Agent.Analytics;
+using Hermes.Agent.Plugins;
 using Hermes.Agent.Soul;
 using Hermes.Agent.Tools;
 using HermesDesktop.Services;
@@ -45,30 +47,38 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
-        // Logging
-        services.AddLogging(builder => builder.AddDebug().SetMinimumLevel(LogLevel.Information));
+        // Logging — file + debug sinks so logs are visible outside Visual Studio
+        var logsDir = Path.Combine(HermesEnvironment.HermesHomePath, "hermes-cs", "logs");
+        Directory.CreateDirectory(logsDir);
+        services.AddLogging(builder =>
+        {
+            builder.AddDebug();
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddProvider(new FileLoggerProvider(Path.Combine(logsDir, "hermes.log")));
+        });
 
         // LLM config from environment/config.yaml
         var llmConfig = HermesEnvironment.CreateLlmConfig();
         services.AddSingleton(llmConfig);
-        services.AddSingleton<HttpClient>();
+        services.AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
 
         // Optional credential pool for multi-key rotation
         var credentialPool = HermesEnvironment.LoadCredentialPool();
         if (credentialPool is not null)
             services.AddSingleton(credentialPool);
 
+        // Chat client factory — enables runtime model/provider swapping
+        // Pattern from Claude Code: model read from state at call time, fresh client on swap
+        services.AddSingleton(sp => new ChatClientFactory(
+            sp.GetRequiredService<LlmConfig>(),
+            new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
+            sp.GetRequiredService<ILogger<ChatClientFactory>>(),
+            sp.GetService<CredentialPool>()));
+
+        // Swappable proxy — all existing IChatClient consumers automatically route
+        // through the factory's current client. No code changes needed anywhere else.
         services.AddSingleton<IChatClient>(sp =>
-        {
-            var config = sp.GetRequiredService<LlmConfig>();
-            var http = sp.GetRequiredService<HttpClient>();
-            var pool = sp.GetService<CredentialPool>(); // null if not configured
-            return config.Provider?.ToLowerInvariant() switch
-            {
-                "anthropic" or "claude" => new AnthropicClient(config, http, pool),
-                _ => new OpenAiClient(config, http, pool),
-            };
-        });
+            new SwappableChatClient(sp.GetRequiredService<ChatClientFactory>()));
 
         // Hermes home directory
         var hermesHome = HermesEnvironment.HermesHomePath;
@@ -108,6 +118,20 @@ public partial class App : Application
         services.AddSingleton(sp => new BuddyService(
             buddyDir,
             sp.GetRequiredService<IChatClient>()));
+
+        // Wiki system (persistent knowledge base)
+        var wikiConfig = new Hermes.Agent.Wiki.WikiConfig();
+        services.AddSingleton(wikiConfig);
+        services.AddSingleton<Hermes.Agent.Wiki.IWikiStorage>(sp =>
+            new Hermes.Agent.Wiki.LocalWikiStorage(sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>()));
+        services.AddSingleton(sp => new Hermes.Agent.Wiki.WikiSearchIndex(
+            Path.Combine(sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>().WikiPath, ".wiki-search.db"),
+            sp.GetRequiredService<ILogger<Hermes.Agent.Wiki.WikiSearchIndex>>()));
+        services.AddSingleton(sp => new Hermes.Agent.Wiki.WikiManager(
+            sp.GetRequiredService<Hermes.Agent.Wiki.IWikiStorage>(),
+            sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>(),
+            sp.GetRequiredService<Hermes.Agent.Wiki.WikiSearchIndex>(),
+            sp.GetRequiredService<ILogger<Hermes.Agent.Wiki.WikiManager>>()));
 
         // Soul service (persistent identity, user profile, mistakes, habits)
         services.AddSingleton(sp => new SoulService(
@@ -157,6 +181,18 @@ public partial class App : Application
         // Tool registry (shared across agent and subagents)
         services.AddSingleton<IToolRegistry, ToolRegistry>();
 
+        // Plugin manager
+        services.AddSingleton(sp =>
+        {
+            var pm = new PluginManager(sp.GetRequiredService<ILogger<PluginManager>>());
+            pm.Register(new BuiltinMemoryPlugin(sp.GetRequiredService<MemoryManager>()));
+            return pm;
+        });
+
+        // Analytics / Insights service
+        var insightsDir = Path.Combine(projectDir, "analytics");
+        services.AddSingleton(_ => new InsightsService(insightsDir));
+
         // Core agent — wired with all optional dependencies
         services.AddSingleton(sp => new Agent(
             sp.GetRequiredService<IChatClient>(),
@@ -165,7 +201,8 @@ public partial class App : Application
             transcripts: sp.GetRequiredService<TranscriptStore>(),
             memories: sp.GetRequiredService<MemoryManager>(),
             contextManager: sp.GetRequiredService<ContextManager>(),
-            soulService: sp.GetRequiredService<SoulService>()));
+            soulService: sp.GetRequiredService<SoulService>(),
+            pluginManager: sp.GetRequiredService<PluginManager>()));
 
         // Agent service (subagent spawning, worktree isolation)
         var worktreesDir = Path.Combine(projectDir, "worktrees");
@@ -284,6 +321,32 @@ public partial class App : Application
 
         // Agent tool (subagent spawning — needs chat client and tool registry)
         RegisterAndTrack(agent, toolRegistry, new AgentTool(chatClient, toolRegistry));
+
+        // Memory tool
+        var memoryToolDir = Path.Combine(HermesEnvironment.HermesHomePath, "memories");
+        RegisterAndTrack(agent, toolRegistry, new MemoryTool(memoryToolDir));
+
+        // Session search tool
+        var transcriptDir = Path.Combine(
+            HermesEnvironment.HermesHomePath, "hermes-cs", "transcripts");
+        RegisterAndTrack(agent, toolRegistry, new SessionSearchTool(transcriptDir));
+
+        // Skill invoke tool
+        var skillManager = services.GetRequiredService<SkillManager>();
+        RegisterAndTrack(agent, toolRegistry, new SkillInvokeTool(skillManager));
+
+        // Send message tool (stub — gateway integration pending)
+        RegisterAndTrack(agent, toolRegistry, new SendMessageTool());
+
+        // Code sandbox tool
+        RegisterAndTrack(agent, toolRegistry, new CodeSandboxTool());
+
+        // Checkpoint tool
+        var checkpointDir = Path.Combine(HermesEnvironment.HermesHomePath, "checkpoints");
+        RegisterAndTrack(agent, toolRegistry, new CheckpointTool(checkpointDir));
+
+        // Patch tool
+        RegisterAndTrack(agent, toolRegistry, new PatchTool());
     }
 
     /// <summary>Register a tool with both the Agent and the shared IToolRegistry.</summary>

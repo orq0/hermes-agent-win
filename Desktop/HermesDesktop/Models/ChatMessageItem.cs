@@ -51,6 +51,8 @@ public sealed class ToolCallInfo : INotifyPropertyChanged
 public sealed class ChatMessageItem : INotifyPropertyChanged
 {
     private string _content;
+    private readonly System.Text.StringBuilder _thinkingBuilder = new();
+    private string _thinkingContent = "";
     private bool _isStreaming;
     private ChatMessageType _messageType;
 
@@ -86,6 +88,16 @@ public sealed class ChatMessageItem : INotifyPropertyChanged
         set { _content = value; OnPropertyChanged(); }
     }
 
+    /// <summary>Reasoning/thinking content from reasoning models (collapsible in UI).</summary>
+    public string ThinkingContent
+    {
+        get => _thinkingContent;
+        set { _thinkingContent = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasThinking)); }
+    }
+
+    /// <summary>Whether this message has any thinking content to display.</summary>
+    public bool HasThinking => !string.IsNullOrEmpty(_thinkingContent);
+
     public bool IsStreaming
     {
         get => _isStreaming;
@@ -106,6 +118,14 @@ public sealed class ChatMessageItem : INotifyPropertyChanged
     {
         _content += token;
         OnPropertyChanged(nameof(Content));
+    }
+
+    public void AppendThinking(string token)
+    {
+        _thinkingBuilder.Append(token);
+        _thinkingContent = _thinkingBuilder.ToString();
+        OnPropertyChanged(nameof(ThinkingContent));
+        OnPropertyChanged(nameof(HasThinking));
     }
 
     // ── INotifyPropertyChanged ──

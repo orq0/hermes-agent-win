@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Hermes.Agent.Core;
+using Hermes.Agent.LLM;
 using Hermes.Agent.Skills;
 using Hermes.Agent.Soul;
 using Hermes.Agent.Transcript;
@@ -16,6 +17,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.ApplicationModel.Resources;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace HermesDesktop.Views;
 
@@ -28,6 +30,8 @@ public sealed partial class ChatPage : Page
     private readonly TranscriptStore _transcriptStore = App.Services.GetRequiredService<TranscriptStore>();
     private readonly SessionRecorder _sessionRecorder = new();
     private readonly SoulService _soulService = App.Services.GetRequiredService<SoulService>();
+    private readonly ChatClientFactory _clientFactory = App.Services.GetRequiredService<ChatClientFactory>();
+    private bool _suppressModelSwitch;
     private readonly Brush _assistantBackgroundBrush;
     private readonly Brush _assistantBorderBrush;
     private readonly Brush _userBackgroundBrush;
@@ -48,11 +52,14 @@ public sealed partial class ChatPage : Page
         _assistantBackgroundBrush = GetBrush("AppPanelBrush");
         _assistantBorderBrush = GetBrush("AppStrokeBrush");
         _userBackgroundBrush = GetBrush("AppUserBubbleBrush");
-        _userBorderBrush = GetBrush("AppAccentBrush");
+        _userBorderBrush = GetBrush("AppAccentGradientBrush");
         _systemBackgroundBrush = GetBrush("AppInsetBrush");
         _systemBorderBrush = GetBrush("AppSubtleStrokeBrush");
         _accentLabelBrush = GetBrush("AppAccentTextBrush");
         _secondaryLabelBrush = GetBrush("AppTextSecondaryBrush");
+
+        // Set ItemsSource once in code — avoids x:Bind re-evaluation during layout passes
+        MessagesList.ItemsSource = Messages;
     }
 
     public ObservableCollection<ChatMessageItem> Messages { get; } = new();
@@ -66,9 +73,17 @@ public sealed partial class ChatPage : Page
 
         ConnectionStateText.Text = ResourceLoader.GetString("ChatStatusChecking");
         SessionIdLabel.Text = "New Session";
+        UpdateSessionFooterCopyButton();
 
         // Wire session panel click → load session into chat
         SessionPanelView.SessionSelected += OnSessionSelected;
+
+        // Wire session panel delete → reset if current session deleted
+        SessionPanelView.SessionDeleted += sessionId =>
+        {
+            if (_chatService.CurrentSessionId == sessionId)
+                NewChat_Click(this, new RoutedEventArgs());
+        };
 
         // Wire agent activity tracking → replay panel + screen capture
         _agent.ActivityEntryAdded += async entry =>
@@ -113,12 +128,89 @@ public sealed partial class ChatPage : Page
             }
         };
 
+        PopulateModelSwitcher();
+
         if (_soulService.IsFirstRun())
             ShowOnboarding();
         else
             AppendWelcomeMessage();
 
         await RefreshConnectionStatusAsync();
+    }
+
+    // ── Model Switcher ──
+
+    private void PopulateModelSwitcher()
+    {
+        _suppressModelSwitch = true;
+
+        ModelSwitchCombo.Items.Clear();
+
+        // Read API keys from config.yaml provider_keys section (never hardcode keys in source)
+        var anthropicKey = HermesEnvironment.ReadConfigSetting("model", "api_key")
+            ?? HermesEnvironment.ReadConfigSetting("provider_keys", "anthropic") ?? "";
+        var openaiKey = HermesEnvironment.ReadConfigSetting("provider_keys", "openai") ?? "";
+        var qwenKey = HermesEnvironment.ReadConfigSetting("provider_keys", "qwen") ?? "";
+        var ollamaUrl = HermesEnvironment.ReadConfigSetting("provider_keys", "ollama_url")
+            ?? "http://127.0.0.1:11434/v1";
+
+        var presets = new (string Label, string Provider, string Model, string BaseUrl, string ApiKey)[]
+        {
+            ("Claude Sonnet 4.6", "anthropic", "claude-sonnet-4-6", "https://api.anthropic.com", anthropicKey),
+            ("GPT-5.4", "openai", "gpt-5.4", "https://api.openai.com/v1", openaiKey),
+            ("GPT-5.4 Mini", "openai", "gpt-5.4-mini", "https://api.openai.com/v1", openaiKey),
+            ("Ollama (Local)", "ollama", "glm-4.7-flash:latest", ollamaUrl, ""),
+            ("Qwen", "qwen", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", qwenKey),
+        };
+
+        int selectedIdx = 0;
+        var currentModel = _clientFactory.CurrentModel;
+
+        for (int i = 0; i < presets.Length; i++)
+        {
+            var p = presets[i];
+            ModelSwitchCombo.Items.Add(new ComboBoxItem
+            {
+                Content = p.Label,
+                Tag = $"{p.Provider}|{p.Model}|{p.BaseUrl}|{p.ApiKey}"
+            });
+            if (string.Equals(p.Model, currentModel, StringComparison.OrdinalIgnoreCase))
+                selectedIdx = i;
+        }
+
+        ModelSwitchCombo.SelectedIndex = selectedIdx;
+        _suppressModelSwitch = false;
+    }
+
+    private void ModelSwitchCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressModelSwitch || ModelSwitchCombo.SelectedItem is not ComboBoxItem item)
+            return;
+
+        var tag = item.Tag?.ToString() ?? "";
+        var parts = tag.Split('|', 4);
+        if (parts.Length < 3) return;
+
+        var provider = parts[0];
+        var model = parts[1];
+        var baseUrl = parts[2];
+        var apiKey = parts.Length > 3 ? parts[3] : "";
+
+        var newConfig = new LlmConfig
+        {
+            Provider = provider,
+            Model = model,
+            BaseUrl = baseUrl,
+            ApiKey = string.IsNullOrEmpty(apiKey) ? null : apiKey,
+            Temperature = 0.7,
+            MaxTokens = 4096
+        };
+
+        _clientFactory.SwitchProvider(newConfig);
+
+        // Update status bar
+        ConnectionStateText.Text = $"Switched to {item.Content}";
+        AppendSystemMessage($"Model switched to **{item.Content}** ({provider}/{model})");
     }
 
     private async void OnSessionSelected(string sessionId)
@@ -156,7 +248,9 @@ public sealed partial class ChatPage : Page
                 }
             }
 
+            ScrollToBottom();
             SessionIdLabel.Text = $"Session: {sessionId}";
+            UpdateSessionFooterCopyButton();
             ConnectionStateText.Text = ResourceLoader.GetString("StatusConnected");
 
             // Load activity entries for replay panel
@@ -188,17 +282,18 @@ public sealed partial class ChatPage : Page
         var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
         if (shift.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
         {
-            // Shift+Enter → newline
-            var pos = PromptTextBox.SelectionStart;
-            PromptTextBox.Text = PromptTextBox.Text.Insert(pos, "\r\n");
-            PromptTextBox.SelectionStart = pos + 2;
+            // Shift+Enter → newline (AcceptsReturn handles this natively)
+            return;
         }
-        else
-        {
-            // Enter → send
-            await SendPromptAsync();
-        }
+
+        // Enter → send (prevent the newline from being inserted)
         e.Handled = true;
+        await SendPromptAsync();
+    }
+
+    private void PromptTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SendButton.IsEnabled = !string.IsNullOrWhiteSpace(PromptTextBox.Text) && !_isBusy;
     }
 
     private async Task SendPromptAsync()
@@ -209,6 +304,7 @@ public sealed partial class ChatPage : Page
 
         PromptTextBox.Text = "";
         AppendUserMessage(prompt);
+        ScrollToBottom();
 
         // ── Slash command interception ──
         if (prompt.StartsWith("/", StringComparison.Ordinal))
@@ -225,23 +321,85 @@ public sealed partial class ChatPage : Page
         }
 
         SetBusy(true);
-        ShowThinking(true);
+        ShowThinking(true, "Hermes is thinking");
+
+        // Dot timer declared outside try so finally can always stop it
+        var dotCount = 0;
+        ChatMessageItem? assistantItem = null;
+        var dotTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        dotTimer.Tick += (_, _) =>
+        {
+            dotCount = (dotCount + 1) % 4;
+            var phase = assistantItem is null ? "thinking" : "reasoning";
+            ThinkingText.Text = $"Hermes is {phase}" + new string('.', dotCount);
+        };
+        dotTimer.Start();
 
         try
         {
-            // Use the full Agent loop (with tools, permissions, soul context, memory)
-            // This calls Agent.ChatAsync which handles tool calling iteratively
-            var reply = await Task.Run(() => _chatService.SendAsync(prompt, CancellationToken.None));
-            ShowThinking(false);
+            // Don't create the assistant bubble yet — wait for real content.
+            // This prevents an empty bubble sitting on screen during the thinking phase.
+            var thinkingBuffer = new System.Text.StringBuilder();
+            var hasContent = false;
 
-            if (!string.IsNullOrWhiteSpace(reply.Response))
-                AppendAssistantMessage(reply.Response);
-            else
-                AppendSystemMessage("LLM returned an empty response.");
+            // Stream structured events (tokens + thinking)
+            await foreach (var evt in _chatService.StreamStructuredAsync(prompt, CancellationToken.None))
+            {
+                switch (evt.Type)
+                {
+                    case ChatStreamEventType.Thinking:
+                        if (assistantItem is not null)
+                            assistantItem.AppendThinking(evt.Text);
+                        thinkingBuffer.Append(evt.Text);
+                        break;
+
+                    case ChatStreamEventType.Token:
+                        if (!hasContent)
+                        {
+                            hasContent = true;
+
+                            // NOW create the bubble — user sees it appear with content, not empty
+                            assistantItem = AddMessage(
+                                ResourceLoader.GetString("ChatAssistantLabel"), "",
+                                HorizontalAlignment.Left,
+                                _assistantBackgroundBrush, _assistantBorderBrush, _secondaryLabelBrush);
+                            assistantItem.IsStreaming = true;
+
+                            // Attach buffered thinking content if any
+                            if (thinkingBuffer.Length > 0)
+                                assistantItem.ThinkingContent = thinkingBuffer.ToString();
+
+                            ShowThinking(false);
+                        }
+                        assistantItem!.AppendToken(evt.Text);
+                        break;
+
+                    case ChatStreamEventType.Error:
+                        AppendSystemMessage($"Stream error: {evt.Text}");
+                        break;
+                }
+            }
+
+            if (assistantItem is not null)
+            {
+                assistantItem.IsStreaming = false;
+            }
+
+            if (!hasContent)
+            {
+                // Stream completed without producing any content tokens.
+                // Don't fall back to SendAsync — StreamStructuredAsync already
+                // saved the user message to the session, so SendAsync would
+                // duplicate it and corrupt the conversation history.
+                ShowThinking(false);
+                if (thinkingBuffer.Length > 0)
+                    AppendSystemMessage("Model produced only reasoning with no response. Try again or use a different model.");
+                else
+                    AppendSystemMessage("LLM returned an empty response.");
+            }
 
             // Scroll to the final message
-            if (Messages.Count > 0)
-                MessagesList.ScrollIntoView(Messages[^1]);
+            ScrollToBottom();
 
             ConnectionStateText.Text = "Connected";
         }
@@ -258,9 +416,13 @@ public sealed partial class ChatPage : Page
         }
         finally
         {
+            if (assistantItem is not null)
+                assistantItem.IsStreaming = false;
+            dotTimer.Stop();
             SetBusy(false);
             SessionIdLabel.Text = string.IsNullOrEmpty(_chatService.CurrentSessionId)
                 ? "New Session" : $"Session: {_chatService.CurrentSessionId}";
+            UpdateSessionFooterCopyButton();
             PromptTextBox.Focus(FocusState.Programmatic);
         }
     }
@@ -307,7 +469,7 @@ public sealed partial class ChatPage : Page
         {
             var invoker = App.Services.GetRequiredService<SkillInvoker>();
             SetBusy(true);
-            ShowThinking(true);
+            ShowThinking(true, "Running skill...");
 
             var response = await invoker.InvokeAsync(command, args, CancellationToken.None);
             ShowThinking(false);
@@ -333,6 +495,13 @@ public sealed partial class ChatPage : Page
         }
     }
 
+    // ── Stop Generation ──
+
+    private void StopGeneration_Click(object sender, RoutedEventArgs e)
+    {
+        _chatService.CancelStream();
+    }
+
     // ── New Chat ──
 
     private async void NewChat_Click(object sender, RoutedEventArgs e)
@@ -343,6 +512,7 @@ public sealed partial class ChatPage : Page
         _sessionRecorder.StopRecording();
         Messages.Clear();
         SessionIdLabel.Text = "New Session";
+        UpdateSessionFooterCopyButton();
         _onboarding = OnboardingState.None;
 
         if (_soulService.IsFirstRun())
@@ -355,9 +525,34 @@ public sealed partial class ChatPage : Page
 
     // ── Permission Mode ──
 
-    private void PermissionModeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private string _permissionMode = "Default";
+
+    private void PermissionModeToggle_Click(object sender, RoutedEventArgs e)
     {
-        // No-op for now — permission mode tracked but not enforced in UI yet
+        var flyout = new MenuFlyout();
+        string[] modes = ["Default", "Plan", "Auto", "Accept Edits", "Bypass"];
+        foreach (var mode in modes)
+        {
+            var item = new MenuFlyoutItem { Text = mode };
+            if (mode == _permissionMode)
+                item.Icon = new FontIcon { Glyph = "\uE73E" }; // checkmark
+            var captured = mode;
+            item.Click += (_, _) =>
+            {
+                _permissionMode = captured;
+                PermissionModeLabel.Text = $"{captured} mode";
+                _chatService.SetPermissionMode(captured switch
+                {
+                    "Plan" => Hermes.Agent.Permissions.PermissionMode.Plan,
+                    "Auto" => Hermes.Agent.Permissions.PermissionMode.Auto,
+                    "Accept Edits" => Hermes.Agent.Permissions.PermissionMode.AcceptEdits,
+                    "Bypass" => Hermes.Agent.Permissions.PermissionMode.BypassPermissions,
+                    _ => Hermes.Agent.Permissions.PermissionMode.Default
+                });
+            };
+            flyout.Items.Add(item);
+        }
+        flyout.ShowAt((FrameworkElement)sender);
     }
 
     // ── Connection Check ──
@@ -366,7 +561,25 @@ public sealed partial class ChatPage : Page
     {
         ConnectionStateText.Text = ResourceLoader.GetString("ChatStatusChecking");
         var (isHealthy, _) = await Task.Run(() => _chatService.CheckHealthAsync(CancellationToken.None));
-        ConnectionStateText.Text = ResourceLoader.GetString(isHealthy ? "StatusConnected" : "StatusOffline");
+        var line = ResourceLoader.GetString(isHealthy ? "StatusConnected" : "StatusOffline");
+        var toolCount = _agent.Tools.Count;
+        ConnectionStateText.Text = toolCount > 0 ? $"{line} · {toolCount} tools" : line;
+    }
+
+    private void UpdateSessionFooterCopyButton()
+    {
+        var id = _chatService.CurrentSessionId;
+        CopySessionIdButton.IsEnabled = !string.IsNullOrEmpty(id);
+    }
+
+    private void CopySessionId_Click(object sender, RoutedEventArgs e)
+    {
+        var id = _chatService.CurrentSessionId;
+        if (string.IsNullOrEmpty(id)) return;
+
+        var package = new DataPackage();
+        package.SetText(id);
+        Clipboard.SetContent(package);
     }
 
     // ── UI Helpers ──
@@ -374,15 +587,16 @@ public sealed partial class ChatPage : Page
     private void SetBusy(bool busy)
     {
         _isBusy = busy;
-        SendButton.IsEnabled = !busy;
+        SendButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(PromptTextBox.Text);
         PromptTextBox.IsEnabled = !busy;
     }
 
-    private void ShowThinking(bool show)
+    private void ShowThinking(bool show, string? label = null)
     {
         ThinkingIndicator.Opacity = show ? 1.0 : 0.0;
         ThinkingRing.IsActive = show;
-        // Don't scroll here — let AddMessage handle it once
+        if (label is not null)
+            ThinkingText.Text = label;
     }
 
     private void AppendUserMessage(string text) =>
@@ -572,8 +786,13 @@ Write the USER.md content now (markdown format, start with # User Profile):";
     {
         var item = new ChatMessageItem(author, content, align, bg, border, label, type);
         Messages.Add(item);
-        MessagesList.ScrollIntoView(item);
         return item;
+    }
+
+    private void ScrollToBottom()
+    {
+        if (Messages.Count > 0)
+            MessagesList.ScrollIntoView(Messages[^1]);
     }
 
     // ── Typewriter Replay ──
@@ -597,7 +816,7 @@ Write the USER.md content now (markdown format, start with # User Profile):";
         }
 
         item.IsStreaming = false;
-        MessagesList.ScrollIntoView(item);
+        ScrollToBottom();
     }
 
     // ── Panel Splitter ──
