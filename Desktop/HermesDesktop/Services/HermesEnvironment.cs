@@ -154,6 +154,49 @@ internal static class HermesEnvironment
         TelegramConfigured || DiscordConfigured || SlackConfigured ||
         WhatsAppConfigured || MatrixConfigured || WebhookConfigured;
 
+    /// <summary>Whether native C# adapters are available (Telegram, Discord).</summary>
+    internal static bool CanUseNativeGateway => true;
+
+    /// <summary>Platforms that have native C# adapters and don't need the Python gateway.</summary>
+    internal static readonly HashSet<string> NativePlatforms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "telegram", "discord"
+    };
+
+    /// <summary>Check whether the native C# gateway is currently running (via DI singleton).</summary>
+    internal static bool IsNativeGatewayRunning()
+    {
+        try
+        {
+            var gateway = HermesDesktop.App.Services?.GetService(
+                typeof(Hermes.Agent.Gateway.GatewayService)) as Hermes.Agent.Gateway.GatewayService;
+            return gateway?.IsRunning == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Get the native gateway's connected adapter status for display.</summary>
+    internal static Dictionary<string, bool> GetNativeAdapterStatus()
+    {
+        var status = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var gateway = HermesDesktop.App.Services?.GetService(
+                typeof(Hermes.Agent.Gateway.GatewayService)) as Hermes.Agent.Gateway.GatewayService;
+            if (gateway is null) return status;
+
+            foreach (var (platform, adapter) in gateway.Adapters)
+            {
+                status[platform.ToString()] = adapter.IsConnected;
+            }
+        }
+        catch { }
+        return status;
+    }
+
     /// <summary>Path to the gateway PID file.</summary>
     internal static string GatewayPidPath => Path.Combine(HermesHomePath, "gateway.pid");
 
@@ -395,7 +438,7 @@ internal static class HermesEnvironment
             string trimmed = lines[i].Trim();
             if (trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                lines[i] = $"    {key}: {value}";
+                lines[i] = $"    {key}: {QuoteYamlValue(value)}";
                 found = true;
                 break;
             }
@@ -403,7 +446,7 @@ internal static class HermesEnvironment
 
         if (!found)
         {
-            lines.Insert(platStart + 1, $"    {key}: {value}");
+            lines.Insert(platStart + 1, $"    {key}: {QuoteYamlValue(value)}");
         }
 
         await File.WriteAllLinesAsync(configPath, lines);
@@ -552,27 +595,6 @@ internal static class HermesEnvironment
         return value;
     }
 
-    /// <summary>Write model configuration to config.yaml.</summary>
-    internal static async Task SaveModelConfigAsync(string provider, string baseUrl, string model, string apiKey)
-    {
-        var configPath = HermesConfigPath;
-        var dir = Path.GetDirectoryName(configPath);
-        if (dir is not null && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-
-        var settings = new Dictionary<string, string>
-        {
-            ["provider"] = provider,
-            ["base_url"] = baseUrl,
-            ["default"] = model,
-        };
-
-        if (!string.IsNullOrWhiteSpace(apiKey))
-            settings["api_key"] = apiKey;
-
-        await WriteYamlSectionAsync(configPath, "model", settings);
-    }
-
     /// <summary>Write an integration token to config.yaml under the integrations section.</summary>
     internal static async Task SaveIntegrationTokenAsync(string key, string value)
     {
@@ -590,21 +612,27 @@ internal static class HermesEnvironment
     }
 
     /// <summary>Read a value from the integrations section of config.yaml.</summary>
-    internal static string? ReadIntegrationSetting(string key)
+    internal static string? ReadIntegrationSetting(string key) => ReadConfigSetting("integrations", key);
+
+    /// <summary>Read a value from any top-level section of config.yaml (section.key).</summary>
+    internal static string? ReadConfigSetting(string section, string key)
     {
         if (!File.Exists(HermesConfigPath))
             return null;
 
         bool inSection = false;
+        string sectionHeader = $"{section}:";
         foreach (string rawLine in File.ReadLines(HermesConfigPath))
         {
             string line = rawLine.TrimEnd();
             if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#", StringComparison.Ordinal))
                 continue;
 
-            if (!char.IsWhiteSpace(rawLine, 0) && line.EndsWith(":", StringComparison.Ordinal))
+            // Any non-indented line is a section boundary (whether it ends with ':' or not)
+            if (rawLine.Length > 0 && !char.IsWhiteSpace(rawLine, 0))
             {
-                inSection = string.Equals(line, "integrations:", StringComparison.OrdinalIgnoreCase);
+                inSection = line.EndsWith(":", StringComparison.Ordinal) &&
+                            string.Equals(line, sectionHeader, StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -617,6 +645,30 @@ internal static class HermesEnvironment
         }
 
         return null;
+    }
+
+    /// <summary>Save settings to any top-level section of config.yaml.</summary>
+    internal static async Task SaveConfigSectionAsync(string section, Dictionary<string, string> settings)
+    {
+        var configPath = HermesConfigPath;
+        var dir = Path.GetDirectoryName(configPath);
+        if (dir is not null && !Directory.Exists(dir))
+            Directory.CreateDirectory(dir);
+        await WriteYamlSectionAsync(configPath, section, settings);
+    }
+
+    /// <summary>Quote a YAML value if it contains special characters.</summary>
+    private static string QuoteYamlValue(string val)
+    {
+        if (string.IsNullOrEmpty(val)) return "\"\"";
+        if (val.Contains('#') || val.Contains(": ") || val.Contains('{') || val.Contains('}') ||
+            val.Contains('[') || val.Contains(']') || val.StartsWith("'") || val.StartsWith("\"") ||
+            val.StartsWith(" ") || val.EndsWith(" ") ||
+            val.Contains('\n') || val.Contains('\r'))
+        {
+            return $"\"{val.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r")}\"";
+        }
+        return val;
     }
 
     private static async Task WriteYamlSectionAsync(string configPath, string sectionName, Dictionary<string, string> settings)
@@ -647,11 +699,11 @@ internal static class HermesEnvironment
             }
         }
 
-        // Build new section lines
+        // Build new section lines — quote values containing YAML-special characters
         var newSection = new List<string> { $"{sectionName}:" };
         foreach (var kv in settings)
         {
-            newSection.Add($"  {kv.Key}: {kv.Value}");
+            newSection.Add($"  {kv.Key}: {QuoteYamlValue(kv.Value)}");
         }
 
         if (sectionStart >= 0)

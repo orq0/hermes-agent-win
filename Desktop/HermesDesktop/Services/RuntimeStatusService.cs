@@ -29,12 +29,14 @@ internal sealed record RuntimeStatusSnapshot(
 internal sealed class RuntimeStatusService
 {
     private readonly HermesChatService _chatService;
-    private readonly LlmConfig _llmConfig;
+    private readonly ChatClientFactory _chatClientFactory;
 
-    public RuntimeStatusService(HermesChatService chatService, LlmConfig llmConfig)
+    public RuntimeStatusService(
+        HermesChatService chatService,
+        ChatClientFactory chatClientFactory)
     {
         _chatService = chatService;
-        _llmConfig = llmConfig;
+        _chatClientFactory = chatClientFactory;
     }
 
     public RuntimeStatusSnapshot GetConfiguredSnapshot()
@@ -67,13 +69,14 @@ internal sealed class RuntimeStatusService
 
     private RuntimeStatusSnapshot CreateSnapshot(RuntimeConnectionState state, string detail)
     {
-        var provider = NormalizeProvider(_llmConfig.Provider);
-        var model = string.IsNullOrWhiteSpace(_llmConfig.Model)
+        var runtimeConfig = _chatClientFactory.CurrentConfig;
+        var provider = NormalizeProvider(runtimeConfig.Provider);
+        var model = string.IsNullOrWhiteSpace(runtimeConfig.Model)
             ? HermesEnvironment.DefaultModel
-            : _llmConfig.Model;
-        var baseUrl = string.IsNullOrWhiteSpace(_llmConfig.BaseUrl)
+            : runtimeConfig.Model;
+        var baseUrl = string.IsNullOrWhiteSpace(runtimeConfig.BaseUrl)
             ? HermesEnvironment.ModelBaseUrl
-            : _llmConfig.BaseUrl;
+            : runtimeConfig.BaseUrl;
 
         return new RuntimeStatusSnapshot(
             Provider: provider,

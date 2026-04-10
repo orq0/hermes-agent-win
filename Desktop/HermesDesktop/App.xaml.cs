@@ -13,10 +13,15 @@ using Hermes.Agent.Context;
 using Hermes.Agent.Agents;
 using Hermes.Agent.Coordinator;
 using Hermes.Agent.Mcp;
+using Hermes.Agent.Analytics;
+using Hermes.Agent.Plugins;
 using Hermes.Agent.Soul;
 using Hermes.Agent.Tools;
+using Hermes.Agent.Gateway;
+using Hermes.Agent.Gateway.Platforms;
 using HermesDesktop.Services;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 
@@ -45,35 +50,67 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
-        // Logging
-        services.AddLogging(builder => builder.AddDebug().SetMinimumLevel(LogLevel.Information));
+        // Logging — file + debug sinks so logs are visible outside Visual Studio
+        var logsDir = Path.Combine(HermesEnvironment.HermesHomePath, "hermes-cs", "logs");
+        Directory.CreateDirectory(logsDir);
+        services.AddLogging(builder =>
+        {
+            builder.AddDebug();
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddProvider(new FileLoggerProvider(Path.Combine(logsDir, "hermes.log")));
+        });
 
         // LLM config from environment/config.yaml
         var llmConfig = HermesEnvironment.CreateLlmConfig();
         services.AddSingleton(llmConfig);
-        services.AddSingleton<HttpClient>();
+        services.AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
 
         // Optional credential pool for multi-key rotation
         var credentialPool = HermesEnvironment.LoadCredentialPool();
         if (credentialPool is not null)
             services.AddSingleton(credentialPool);
 
-        services.AddSingleton<IChatClient>(sp =>
-        {
-            var config = sp.GetRequiredService<LlmConfig>();
-            var http = sp.GetRequiredService<HttpClient>();
-            var pool = sp.GetService<CredentialPool>(); // null if not configured
-            return config.Provider?.ToLowerInvariant() switch
-            {
-                "anthropic" or "claude" => new AnthropicClient(config, http, pool),
-                _ => new OpenAiClient(config, http, pool),
-            };
-        });
+        // Chat client factory — enables runtime model/provider swapping
+        // Pattern from Claude Code: model read from state at call time, fresh client on swap
+        services.AddSingleton(sp => new ChatClientFactory(
+            sp.GetRequiredService<LlmConfig>(),
+            new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
+            sp.GetRequiredService<ILogger<ChatClientFactory>>(),
+            sp.GetService<CredentialPool>()));
 
-        // Hermes home directory
+        // Swappable proxy — all existing IChatClient consumers automatically route
+        // through the factory's current client. No code changes needed anywhere else.
+        services.AddSingleton<IChatClient>(sp =>
+            new SwappableChatClient(sp.GetRequiredService<ChatClientFactory>()));
+
+        // Hermes home directory — ensure all required dirs exist on startup
         var hermesHome = HermesEnvironment.HermesHomePath;
         var projectDir = Path.Combine(hermesHome, "hermes-cs");
-        Directory.CreateDirectory(projectDir);
+        foreach (var dir in new[]
+        {
+            hermesHome, projectDir,
+            Path.Combine(hermesHome, "soul"),              // mistakes.jsonl, habits.jsonl
+            Path.Combine(projectDir, "transcripts"),
+            Path.Combine(projectDir, "memory"),
+            Path.Combine(projectDir, "skills"),
+            Path.Combine(projectDir, "tasks"),
+            Path.Combine(projectDir, "buddy"),
+            Path.Combine(projectDir, "agents"),
+            Path.Combine(projectDir, "analytics"),
+        })
+        {
+            Directory.CreateDirectory(dir);
+        }
+        // Ensure SOUL.md and USER.md exist with defaults
+        var soulPath = Path.Combine(hermesHome, "SOUL.md");
+        var userPath = Path.Combine(hermesHome, "USER.md");
+        if (!File.Exists(soulPath))
+            File.WriteAllText(soulPath, "# Agent Soul\n\nYou are a helpful AI assistant.\n");
+        if (!File.Exists(userPath))
+            File.WriteAllText(userPath, "# User Profile\n\nNo profile configured yet. Tell me about yourself.\n");
+        System.Diagnostics.Debug.WriteLine($"Hermes home: {hermesHome}");
+        System.Diagnostics.Debug.WriteLine($"SOUL.md: {soulPath} (exists: {File.Exists(soulPath)})");
+        System.Diagnostics.Debug.WriteLine($"USER.md: {userPath} (exists: {File.Exists(userPath)})");
 
         // Transcript store
         var transcriptsDir = Path.Combine(projectDir, "transcripts");
@@ -86,8 +123,18 @@ public partial class App : Application
             sp.GetRequiredService<IChatClient>(),
             sp.GetRequiredService<ILogger<MemoryManager>>()));
 
-        // Skill manager
+        // Skill manager — copy bundled skills on first run if user dir is empty
         var skillsDir = Path.Combine(projectDir, "skills");
+        var bundledSkillsDir = FindRepoSkillsDir();
+        if ((!Directory.Exists(skillsDir) || !Directory.EnumerateFileSystemEntries(skillsDir).Any())
+            && bundledSkillsDir is not null)
+        {
+            if (Directory.Exists(bundledSkillsDir))
+            {
+                CopyDirectoryRecursive(bundledSkillsDir, skillsDir);
+                System.Diagnostics.Debug.WriteLine($"Copied bundled skills from {bundledSkillsDir} to {skillsDir}");
+            }
+        }
         services.AddSingleton(sp => new SkillManager(
             skillsDir,
             sp.GetRequiredService<ILogger<SkillManager>>()));
@@ -108,6 +155,20 @@ public partial class App : Application
         services.AddSingleton(sp => new BuddyService(
             buddyDir,
             sp.GetRequiredService<IChatClient>()));
+
+        // Wiki system (persistent knowledge base)
+        var wikiConfig = new Hermes.Agent.Wiki.WikiConfig();
+        services.AddSingleton(wikiConfig);
+        services.AddSingleton<Hermes.Agent.Wiki.IWikiStorage>(sp =>
+            new Hermes.Agent.Wiki.LocalWikiStorage(sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>()));
+        services.AddSingleton(sp => new Hermes.Agent.Wiki.WikiSearchIndex(
+            Path.Combine(sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>().WikiPath, ".wiki-search.db"),
+            sp.GetRequiredService<ILogger<Hermes.Agent.Wiki.WikiSearchIndex>>()));
+        services.AddSingleton(sp => new Hermes.Agent.Wiki.WikiManager(
+            sp.GetRequiredService<Hermes.Agent.Wiki.IWikiStorage>(),
+            sp.GetRequiredService<Hermes.Agent.Wiki.WikiConfig>(),
+            sp.GetRequiredService<Hermes.Agent.Wiki.WikiSearchIndex>(),
+            sp.GetRequiredService<ILogger<Hermes.Agent.Wiki.WikiManager>>()));
 
         // Soul service (persistent identity, user profile, mistakes, habits)
         services.AddSingleton(sp => new SoulService(
@@ -157,6 +218,18 @@ public partial class App : Application
         // Tool registry (shared across agent and subagents)
         services.AddSingleton<IToolRegistry, ToolRegistry>();
 
+        // Plugin manager
+        services.AddSingleton(sp =>
+        {
+            var pm = new PluginManager(sp.GetRequiredService<ILogger<PluginManager>>());
+            pm.Register(new BuiltinMemoryPlugin(sp.GetRequiredService<MemoryManager>()));
+            return pm;
+        });
+
+        // Analytics / Insights service
+        var insightsDir = Path.Combine(projectDir, "analytics");
+        services.AddSingleton(_ => new InsightsService(insightsDir));
+
         // Core agent — wired with all optional dependencies
         services.AddSingleton(sp => new Agent(
             sp.GetRequiredService<IChatClient>(),
@@ -165,7 +238,8 @@ public partial class App : Application
             transcripts: sp.GetRequiredService<TranscriptStore>(),
             memories: sp.GetRequiredService<MemoryManager>(),
             contextManager: sp.GetRequiredService<ContextManager>(),
-            soulService: sp.GetRequiredService<SoulService>()));
+            soulService: sp.GetRequiredService<SoulService>(),
+            pluginManager: sp.GetRequiredService<PluginManager>()));
 
         // Agent service (subagent spawning, worktree isolation)
         var worktreesDir = Path.Combine(projectDir, "worktrees");
@@ -185,6 +259,13 @@ public partial class App : Application
             sp.GetRequiredService<IChatClient>(),
             coordinatorStateDir));
 
+        // Native C# gateway — no Python CLI required for Telegram/Discord
+        services.AddSingleton(sp =>
+        {
+            var gatewayConfig = BuildGatewayConfig();
+            return new GatewayService(gatewayConfig, sp.GetRequiredService<ILogger<GatewayService>>());
+        });
+
         // Skill invoker (for slash command support)
         services.AddSingleton(sp => new Hermes.Agent.Skills.SkillInvoker(
             sp.GetRequiredService<Hermes.Agent.Skills.SkillManager>(),
@@ -203,6 +284,9 @@ public partial class App : Application
 
         // Wire permission prompt callback to show a ContentDialog in the UI
         WirePermissionCallback(provider);
+
+        // Start native C# gateway if platform tokens are configured
+        StartNativeGateway(provider);
 
         return provider;
     }
@@ -285,6 +369,33 @@ public partial class App : Application
 
         // Agent tool (subagent spawning — needs chat client and tool registry)
         RegisterAndTrack(agent, toolRegistry, new AgentTool(chatClient, toolRegistry));
+
+        // Memory tool
+        var memoryToolDir = Path.Combine(HermesEnvironment.HermesHomePath, "memories");
+        RegisterAndTrack(agent, toolRegistry, new MemoryTool(memoryToolDir));
+
+        // Session search tool
+        var transcriptDir = Path.Combine(
+            HermesEnvironment.HermesHomePath, "hermes-cs", "transcripts");
+        RegisterAndTrack(agent, toolRegistry, new SessionSearchTool(transcriptDir));
+
+        // Skill invoke tool
+        var skillManager = services.GetRequiredService<SkillManager>();
+        RegisterAndTrack(agent, toolRegistry, new SkillInvokeTool(skillManager));
+
+        // Send message tool (wired to native C# gateway)
+        var gateway = services.GetRequiredService<GatewayService>();
+        RegisterAndTrack(agent, toolRegistry, new SendMessageTool(gateway));
+
+        // Code sandbox tool
+        RegisterAndTrack(agent, toolRegistry, new CodeSandboxTool());
+
+        // Checkpoint tool
+        var checkpointDir = Path.Combine(HermesEnvironment.HermesHomePath, "checkpoints");
+        RegisterAndTrack(agent, toolRegistry, new CheckpointTool(checkpointDir));
+
+        // Patch tool
+        RegisterAndTrack(agent, toolRegistry, new PatchTool());
     }
 
     /// <summary>Register a tool with both the Agent and the shared IToolRegistry.</summary>
@@ -292,6 +403,130 @@ public partial class App : Application
     {
         agent.RegisterTool(tool);
         registry.RegisterTool(tool);
+    }
+
+    /// <summary>Find the repo's skills/ directory by walking up from the build output to find .git or skills/.</summary>
+    private static string? FindRepoSkillsDir()
+    {
+        // Walk up from build output to find the repo root (contains .git or skills/)
+        var dir = AppContext.BaseDirectory;
+        for (int i = 0; i < 10 && dir is not null; i++)
+        {
+            var skillsCandidate = Path.Combine(dir, "skills");
+            if (Directory.Exists(skillsCandidate) && Directory.Exists(Path.Combine(dir, ".git")))
+            {
+                System.Diagnostics.Debug.WriteLine($"Found repo skills at: {skillsCandidate}");
+                return skillsCandidate;
+            }
+            // Also check for skills/ without .git (user may have extracted without git)
+            if (Directory.Exists(skillsCandidate) && Directory.EnumerateDirectories(skillsCandidate).Any())
+            {
+                System.Diagnostics.Debug.WriteLine($"Found skills dir at: {skillsCandidate}");
+                return skillsCandidate;
+            }
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        System.Diagnostics.Debug.WriteLine("Could not find bundled skills directory");
+        return null;
+    }
+
+    /// <summary>Copy a directory tree recursively (used for first-run skill bundling).</summary>
+    private static void CopyDirectoryRecursive(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: false);
+        foreach (var dir in Directory.EnumerateDirectories(source))
+            CopyDirectoryRecursive(dir, Path.Combine(destination, Path.GetFileName(dir)));
+    }
+
+    /// <summary>
+    /// Build gateway configuration from config.yaml platform tokens.
+    /// </summary>
+    private static GatewayConfig BuildGatewayConfig()
+    {
+        var config = new GatewayConfig();
+
+        var telegramToken = HermesEnvironment.ReadPlatformSetting("telegram", "token");
+        if (!string.IsNullOrWhiteSpace(telegramToken))
+        {
+            config.Platforms[Platform.Telegram] = new PlatformConfig
+            {
+                Enabled = true,
+                Token = telegramToken
+            };
+        }
+
+        var discordToken = HermesEnvironment.ReadPlatformSetting("discord", "token");
+        if (!string.IsNullOrWhiteSpace(discordToken))
+        {
+            config.Platforms[Platform.Discord] = new PlatformConfig
+            {
+                Enabled = true,
+                Token = discordToken
+            };
+        }
+
+        return config;
+    }
+
+    /// <summary>
+    /// Start the native C# gateway in the background if platform tokens are configured.
+    /// Wires the agent as the message handler so incoming Telegram/Discord messages
+    /// are processed by the Hermes agent.
+    /// </summary>
+    private static void StartNativeGateway(IServiceProvider services)
+    {
+        try
+        {
+            var gateway = services.GetRequiredService<GatewayService>();
+            var agent = services.GetRequiredService<Agent>();
+            var logger = services.GetRequiredService<ILogger<App>>();
+
+            // Wire agent as the message handler
+            gateway.SetAgentHandler(async (sessionId, userMessage, platform) =>
+            {
+                var session = new Session { Id = sessionId, Platform = platform };
+                return await agent.ChatAsync(userMessage, session, CancellationToken.None);
+            });
+
+            // Create adapters for configured platforms
+            var adapters = new List<IPlatformAdapter>();
+
+            var tgToken = HermesEnvironment.ReadPlatformSetting("telegram", "token");
+            if (!string.IsNullOrWhiteSpace(tgToken))
+                adapters.Add(new TelegramAdapter(tgToken));
+
+            var dcToken = HermesEnvironment.ReadPlatformSetting("discord", "token");
+            if (!string.IsNullOrWhiteSpace(dcToken))
+                adapters.Add(new DiscordAdapter(dcToken));
+
+            if (adapters.Count > 0)
+            {
+                logger.LogInformation("Starting native gateway with {Count} platform(s)", adapters.Count);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await gateway.StartAsync(adapters, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Gateway start failed: {ex.Message}");
+                        logger.LogError(ex, "Native gateway start failed");
+                    }
+                });
+            }
+            else
+            {
+                logger.LogDebug("No platform tokens configured — native gateway not started");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Gateway initialization error: {ex.Message}");
+        }
     }
 
     /// <summary>

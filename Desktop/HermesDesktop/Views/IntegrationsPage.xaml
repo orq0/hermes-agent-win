@@ -27,10 +27,55 @@
                 </StackPanel>
             </Border>
 
-            <!-- Gateway Status -->
+            <!-- Gateway info notice -->
+            <Border Background="#1A1500" CornerRadius="8" Padding="16,12" BorderBrush="#3A3000" BorderThickness="1">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="&#xE946; Native C# gateway for Telegram and Discord"
+                               FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                               FontSize="13" Foreground="{StaticResource AppAccentTextBrush}" />
+                    <TextBlock Text="Telegram and Discord run natively in the desktop app — no Python required. For advanced platforms (Slack, WhatsApp, Matrix), install hermes-agent for the Python gateway."
+                               FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
+                    <HyperlinkButton Content="Install hermes-agent for additional platforms (pip install hermes-agent)"
+                                     NavigateUri="https://github.com/NousResearch/hermes-agent"
+                                     FontSize="12" Padding="0" />
+                </StackPanel>
+            </Border>
+
+            <!-- Native Gateway Status -->
             <Border Style="{StaticResource SurfaceCardStyle}">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="Gateway Status" Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock Text="Native Gateway (C#)" Style="{StaticResource SectionTitleTextStyle}" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Ellipse x:Name="NativeGatewayIndicator" Width="12" Height="12"
+                                 VerticalAlignment="Center" />
+                        <TextBlock x:Name="NativeGatewayStatusText" VerticalAlignment="Center"
+                                   Style="{StaticResource MetricValueTextStyle}" />
+                    </StackPanel>
+                    <TextBlock x:Name="NativeGatewayStateText" FontSize="13"
+                               Foreground="{StaticResource AppTextSecondaryBrush}" />
+                    <!-- Per-adapter connection status -->
+                    <StackPanel x:Name="AdapterStatusPanel" Orientation="Horizontal" Spacing="16" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button x:Name="NativeGatewayToggleButton" Click="NativeGatewayToggle_Click"
+                                Background="{StaticResource AppAccentGradientBrush}"
+                                BorderBrush="{StaticResource AppAccentDarkBrush}"
+                                Foreground="#16110D" Padding="16,8" />
+                        <Button Content="Restart Gateway" Click="RestartNativeGateway_Click"
+                                Background="{StaticResource AppInsetBrush}"
+                                BorderBrush="{StaticResource AppStrokeBrush}"
+                                Foreground="White" Padding="16,8" />
+                        <Button x:Name="GatewayRefreshButton" Content="Refresh" Click="GatewayRefresh_Click"
+                                Background="{StaticResource AppInsetBrush}"
+                                BorderBrush="{StaticResource AppStrokeBrush}"
+                                Foreground="White" Padding="16,8" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Python Gateway Status (advanced platforms) -->
+            <Border Style="{StaticResource SurfaceCardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Python Gateway (Slack, WhatsApp, Matrix)" Style="{StaticResource SectionTitleTextStyle}" />
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <Ellipse x:Name="GatewayIndicator" Width="12" Height="12"
                                  VerticalAlignment="Center" />
@@ -41,10 +86,6 @@
                                Foreground="{StaticResource AppTextSecondaryBrush}" />
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <Button x:Name="GatewayToggleButton" Click="GatewayToggle_Click"
-                                Background="{StaticResource AppAccentGradientBrush}"
-                                BorderBrush="{StaticResource AppAccentDarkBrush}"
-                                Foreground="#16110D" Padding="16,8" />
-                        <Button x:Name="GatewayRefreshButton" Content="Refresh" Click="GatewayRefresh_Click"
                                 Background="{StaticResource AppInsetBrush}"
                                 BorderBrush="{StaticResource AppStrokeBrush}"
                                 Foreground="White" Padding="16,8" />
@@ -68,6 +109,17 @@
                 </StackPanel>
             </Border>
 
+            <!-- Notice -->
+            <Border Style="{StaticResource SurfaceCardStyle}" Background="#2A2000" BorderBrush="#5A4A00">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Integration Status" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{StaticResource AppAccentTextBrush}"/>
+                    <TextBlock Text="Telegram and Discord use native C# adapters — they work without the Python CLI. Slack, WhatsApp, and Matrix still require the hermes-agent Python gateway. Token configuration is saved locally to config.yaml."
+                               FontSize="12" TextWrapping="Wrap"
+                               Foreground="{StaticResource AppTextSecondaryBrush}"/>
+                </StackPanel>
+            </Border>
+
             <!-- Row 1: Telegram + Discord -->
             <Grid ColumnSpacing="20">
                 <Grid.ColumnDefinitions>
@@ -78,9 +130,14 @@
                 <!-- Telegram -->
                 <Border Grid.Column="0" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock
-                            x:Uid="IntegrationsTelegramTitle"
-                            Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                x:Uid="IntegrationsTelegramTitle"
+                                Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#1A3A1A" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Native C#" FontSize="9" Foreground="#6ABF6A"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="TelegramStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="TelegramMaskedText" FontSize="13"
@@ -110,9 +167,14 @@
                 <!-- Discord -->
                 <Border Grid.Column="1" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock
-                            x:Uid="IntegrationsDiscordTitle"
-                            Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                x:Uid="IntegrationsDiscordTitle"
+                                Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#1A3A1A" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Native C#" FontSize="9" Foreground="#6ABF6A"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="DiscordStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="DiscordMaskedText" FontSize="13"
@@ -150,7 +212,12 @@
                 <!-- Slack -->
                 <Border Grid.Column="0" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock Text="Slack" Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Slack" Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#3A2A00" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Config Only" FontSize="9" Foreground="{StaticResource AppAccentTextBrush}"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="SlackStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="SlackMaskedText" FontSize="13"
@@ -188,7 +255,12 @@
                 <!-- WhatsApp -->
                 <Border Grid.Column="1" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock Text="WhatsApp" Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="WhatsApp" Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#3A2A00" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Config Only" FontSize="9" Foreground="{StaticResource AppAccentTextBrush}"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="WhatsAppStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="WhatsAppMaskedText" FontSize="13"
@@ -216,7 +288,12 @@
                 <!-- Matrix -->
                 <Border Grid.Column="0" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock Text="Matrix" Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Matrix" Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#3A2A00" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Config Only" FontSize="9" Foreground="{StaticResource AppAccentTextBrush}"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="MatrixStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="MatrixMaskedText" FontSize="13"
@@ -254,7 +331,12 @@
                 <!-- Webhook -->
                 <Border Grid.Column="1" Style="{StaticResource SurfaceCardStyle}">
                     <StackPanel Spacing="12">
-                        <TextBlock Text="Webhook" Style="{StaticResource SectionTitleTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Webhook" Style="{StaticResource SectionTitleTextStyle}" />
+                            <Border Background="#3A2A00" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                <TextBlock Text="Config Only" FontSize="9" Foreground="{StaticResource AppAccentTextBrush}"/>
+                            </Border>
+                        </StackPanel>
                         <TextBlock x:Name="WebhookStatusText"
                             Style="{StaticResource MetricValueTextStyle}" />
                         <TextBlock x:Name="WebhookMaskedText" FontSize="13"

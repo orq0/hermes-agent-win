@@ -1,4 +1,5 @@
 using HermesDesktop.Services;
+using Hermes.Agent.Analytics;
 using Hermes.Agent.Core;
 using Hermes.Agent.LLM;
 using Hermes.Agent.Skills;
@@ -42,6 +43,7 @@ public sealed partial class DashboardPage : Page
     {
         LoadStats();
         LoadPlatformBadges();
+        LoadInsights();
         await LoadRecentSessionsAsync();
         await RefreshRuntimeStatusAsync();
     }
@@ -221,6 +223,47 @@ public sealed partial class DashboardPage : Page
             TestConnectionResult.Text = $"Failed: {ex.Message}";
             TestConnectionResult.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 239, 68, 68));
             await RefreshRuntimeStatusAsync();
+        }
+    }
+
+    // ── Usage Insights ──
+
+    private void LoadInsights()
+    {
+        var insights = App.Services?.GetService<InsightsService>();
+        if (insights is null)
+        {
+            InsightsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        InsightsPanel.Visibility = Visibility.Visible;
+        var data = insights.GetInsights();
+
+        InsightsTurnsText.Text = data.TotalTurns.ToString("N0");
+
+        long totalToolCalls = 0;
+        foreach (var ts in data.ToolUsage.Values)
+            totalToolCalls += ts.TotalCalls;
+        InsightsToolCallsText.Text = totalToolCalls.ToString("N0");
+
+        InsightsCostText.Text = $"${data.EstimatedCostUsd:F4}";
+
+        TopToolsList.Children.Clear();
+        var topTools = data.ToolUsage
+            .OrderByDescending(kv => kv.Value.TotalCalls)
+            .Take(5);
+
+        foreach (var kv in topTools)
+        {
+            var avgMs = kv.Value.TotalCalls > 0 ? kv.Value.TotalDurationMs / kv.Value.TotalCalls : 0;
+            TopToolsList.Children.Add(new TextBlock
+            {
+                Text = $"{kv.Key}: {kv.Value.TotalCalls} calls • {avgMs} ms avg",
+                Foreground = (Brush)Application.Current.Resources["AppTextSecondaryBrush"],
+                FontSize = 12,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
         }
     }
 

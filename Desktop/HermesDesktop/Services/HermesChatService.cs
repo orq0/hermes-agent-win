@@ -97,32 +97,73 @@ internal sealed class HermesChatService : IDisposable
         }
     }
 
-    // ── Stream (token-by-token) ──
+    // ── Stream (structured events: tokens + thinking) ──
+
+    public async IAsyncEnumerable<ChatStreamEvent> StreamStructuredAsync(
+        string message,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        EnsureSession();
+        _streamCts?.Dispose();
+        _streamCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        var fullResponse = new System.Text.StringBuilder();
+        try
+        {
+            await foreach (var evt in _agent.StreamChatAsync(message, _currentSession!, _streamCts.Token))
+            {
+                switch (evt)
+                {
+                    case Hermes.Agent.LLM.StreamEvent.TokenDelta td:
+                        // Tool-calling status messages (e.g. "[Calling tool: bash]") are
+                        // informational — show in UI but don't accumulate into the saved response
+                        if (td.Text.StartsWith("\n[Calling tool:") && td.Text.TrimEnd().EndsWith("]"))
+                        {
+                            yield return new ChatStreamEvent(ChatStreamEventType.Thinking, td.Text.Trim());
+                        }
+                        else
+                        {
+                            fullResponse.Append(td.Text);
+                            yield return new ChatStreamEvent(ChatStreamEventType.Token, td.Text);
+                        }
+                        break;
+
+                    case Hermes.Agent.LLM.StreamEvent.ThinkingDelta tk:
+                        yield return new ChatStreamEvent(ChatStreamEventType.Thinking, tk.Text);
+                        break;
+
+                    case Hermes.Agent.LLM.StreamEvent.StreamError err:
+                        yield return new ChatStreamEvent(ChatStreamEventType.Error, err.Error.Message);
+                        break;
+                }
+            }
+        }
+        finally
+        {
+            // Save response (partial or complete) — handles normal completion and cancellation.
+            // Always save to avoid dangling user messages in the session, even if response is empty.
+            // Guard against null — session may have been deleted/reset during streaming.
+            if (_currentSession is not null &&
+                _currentSession.Messages.LastOrDefault()?.Role != "assistant")
+            {
+                var assistantMsg = new Message { Role = "assistant", Content = fullResponse.ToString() };
+                _currentSession.AddMessage(assistantMsg);
+                await _transcriptStore.SaveMessageAsync(_currentSession.Id, assistantMsg, CancellationToken.None);
+            }
+        }
+    }
+
+    // ── Legacy string streaming (kept for backwards compatibility) ──
 
     public async IAsyncEnumerable<string> StreamAsync(
         string message,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        EnsureSession();
-        _streamCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-
-        // Save user message
-        var userMsg = new Message { Role = "user", Content = message };
-        _currentSession!.AddMessage(userMsg);
-        await _transcriptStore.SaveMessageAsync(_currentSession.Id, userMsg, _streamCts.Token);
-
-        // Stream tokens
-        var fullResponse = new System.Text.StringBuilder();
-        await foreach (var token in _chatClient.StreamAsync(_currentSession.Messages, _streamCts.Token))
+        await foreach (var evt in StreamStructuredAsync(message, ct))
         {
-            fullResponse.Append(token);
-            yield return token;
+            if (evt.Type == ChatStreamEventType.Token)
+                yield return evt.Text;
         }
-
-        // Save complete assistant response
-        var assistantMsg = new Message { Role = "assistant", Content = fullResponse.ToString() };
-        _currentSession.AddMessage(assistantMsg);
-        await _transcriptStore.SaveMessageAsync(_currentSession.Id, assistantMsg, CancellationToken.None);
     }
 
     // ── Cancel ──
@@ -191,3 +232,14 @@ internal sealed class HermesChatService : IDisposable
 
     internal sealed record HermesChatReply(string Response, string SessionId);
 }
+
+// ── Structured stream events for UI consumption ──
+
+internal enum ChatStreamEventType
+{
+    Token,
+    Thinking,
+    Error
+}
+
+internal sealed record ChatStreamEvent(ChatStreamEventType Type, string Text);
