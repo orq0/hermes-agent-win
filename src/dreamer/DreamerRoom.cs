@@ -5,7 +5,11 @@ public sealed class DreamerRoom
 {
     public string Root { get; }
 
-    public DreamerRoom(string hermesHome) =>
+    /// <summary>
+        /// Initializes a new DreamerRoom rooted at the provided Hermes home directory.
+        /// </summary>
+        /// <param name="hermesHome">Path to the Hermes home directory; the room's Root will be set to <c>Path.Combine(hermesHome, "dreamer")</c>.</param>
+        public DreamerRoom(string hermesHome) =>
         Root = Path.Combine(hermesHome, "dreamer");
 
     public string WalksDir => Path.Combine(Root, "walks");
@@ -18,6 +22,12 @@ public sealed class DreamerRoom
     public string SignalLogPath => Path.Combine(Root, "signal-log.jsonl");
     public string SignalStatePath => Path.Combine(Root, "signal-state.json");
 
+    /// <summary>
+    /// Ensures the Dreamer workspace exists under Root by creating required directories and initializing missing files with default content.
+    /// </summary>
+    /// <remarks>
+    /// Creates the directories: Root, WalksDir, ProjectsDir, InboxDir, InboxRssDir, and FeedbackDir if they do not exist. If missing, writes default content to SoulPath (using DefaultSoulMarkdown), writes a header and description to FascinationsPath, and creates an empty SignalLogPath. The operation is idempotent.
+    /// </remarks>
     public void EnsureLayout()
     {
         foreach (var d in new[] { Root, WalksDir, ProjectsDir, InboxDir, InboxRssDir, FeedbackDir })
@@ -34,7 +44,11 @@ public sealed class DreamerRoom
             File.WriteAllText(SignalLogPath, "");
     }
 
-    public string NewWalkPath() =>
+    /// <summary>
+        /// Generate a new file path for a walk markdown file in the WalksDir using the current UTC timestamp.
+        /// </summary>
+        /// <returns>The full path to a walk markdown file named "walk-YYYYMMDD-HHmmss.md" located in WalksDir.</returns>
+        public string NewWalkPath() =>
         Path.Combine(WalksDir, $"walk-{DateTime.UtcNow:yyyyMMdd-HHmmss}.md");
 
     private const string DefaultSoulMarkdown = """

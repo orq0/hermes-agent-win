@@ -30,12 +30,24 @@ public sealed partial class DashboardPage : Page
     private readonly RuntimeStatusService _runtimeStatusService = App.Services.GetRequiredService<RuntimeStatusService>();
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _dreamerTimer;
 
+    /// <summary>
+    /// Initializes a new instance of DashboardPage and configures page unload cleanup.
+    /// </summary>
+    /// <remarks>
+    /// Sets up the UI components and subscribes to the Unloaded event to stop and detach any timers or resources when the page is unloaded.
+    /// </remarks>
     public DashboardPage()
     {
         InitializeComponent();
         this.Unloaded += OnPageUnloaded;
     }
 
+    /// <summary>
+    /// Cleans up the Dreamer status refresh timer when the page is unloaded.
+    /// </summary>
+    /// <remarks>
+    /// If a timer exists, it will be stopped, its Tick handler that calls RefreshDreamerStatus will be removed, and the backing field will be cleared.
+    /// </remarks>
     private void OnPageUnloaded(object sender, RoutedEventArgs e)
     {
         if (_dreamerTimer is not null)
@@ -50,7 +62,9 @@ public sealed partial class DashboardPage : Page
     public string HermesHomePath => HermesEnvironment.DisplayHermesHomePath;
     public string HermesConfigPath => HermesEnvironment.DisplayHermesConfigPath;
 
-    // ── Lifecycle ──
+    /// <summary>
+    /// Initializes dashboard data and UI when the page is loaded: loads stats, platform/service badges, usage insights, recent sessions, refreshes runtime status, and starts periodic Dreamer status updates.
+    /// </summary>
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
@@ -62,6 +76,12 @@ public sealed partial class DashboardPage : Page
         StartDreamerStatusRefresh();
     }
 
+    /// <summary>
+    /// Starts and schedules periodic updates of the Dreamer status.
+    /// </summary>
+    /// <remarks>
+    /// If a refresh timer is already active, the method does nothing. Otherwise it performs an immediate status refresh and schedules subsequent refreshes at four-second intervals.
+    /// </remarks>
     private void StartDreamerStatusRefresh()
     {
         // Guard against duplicate timers
@@ -75,6 +95,17 @@ public sealed partial class DashboardPage : Page
         _dreamerTimer.Start();
     }
 
+    /// <summary>
+    /// Updates Dreamer-related UI text fields from the current Dreamer status snapshot.
+    /// </summary>
+    /// <remarks>
+    /// If the DreamerStatus service is not available, the method does nothing.
+    /// Updates:
+    /// - <c>DreamerPhaseText</c>: set to "Phase: {Phase}".
+    /// - <c>DreamerWalkCountText</c>: set to "Walks: {WalkCount}".
+    /// - <c>DreamerSignalText</c>: set to "Top signal: —" when <c>TopSignalSlug</c> is null or empty; otherwise "Top signal: {TopSignalSlug} ({TopSignalScore:F1})".
+    /// - <c>DreamerPostcardText</c>: cleared when <c>LastPostcardPreview</c> is null or whitespace; otherwise set to the preview text.
+    /// </remarks>
     private void RefreshDreamerStatus()
     {
         var st = App.Services.GetService<DreamerStatus>();
@@ -331,6 +362,11 @@ public sealed partial class DashboardPage : Page
         return $"{(int)age.TotalDays}d";
     }
 
+    /// <summary>
+    /// Converts an RGB hex color string to an opaque Windows.UI.Color.
+    /// </summary>
+    /// <param name="hex">An RGB hex string (with or without a leading '#'), expected as six hex digits in RRGGBB order.</param>
+    /// <returns>A <see cref="Windows.UI.Color"/> with the parsed R, G, B channels and alpha set to 255.</returns>
     private static Windows.UI.Color ParseColor(string hex)
     {
         hex = hex.TrimStart('#');

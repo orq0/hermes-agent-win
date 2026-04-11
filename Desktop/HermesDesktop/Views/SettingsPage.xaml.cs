@@ -44,7 +44,11 @@ public sealed partial class SettingsPage : Page
 
     // ═══════════════════════════════════════════
     //  Page Loaded — populate all sections
-    // ═══════════════════════════════════════════
+    /// <summary>
+    /// Initializes the settings UI by loading all configuration sections and then refreshes the runtime status.
+    /// </summary>
+    /// <param name="sender">The source of the Loaded event.</param>
+    /// <param name="e">Event data for the Loaded event.</param>
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
         LoadUserProfile();
@@ -801,6 +805,17 @@ This file is a living document about the human I work with. It helps me provide 
         combo.SelectedIndex = fallbackIndex;
     }
 
+    /// <summary>
+    /// Enable or disable the authentication-related input fields to match the selected authentication mode.
+    /// </summary>
+    /// <param name="authMode">
+    /// The selected authentication mode (case-insensitive). Recognized values:
+    /// "api_key" — enables the API key text box;
+    /// "api_key_env" — enables the API key environment variable box;
+    /// "oauth_proxy_env" — enables proxy-related header/scheme fields and the proxy token environment box;
+    /// "oauth_proxy_command" — enables proxy-related header/scheme fields and the proxy token command box.
+    /// A null value is treated as "api_key".
+    /// </param>
     private void UpdateAuthFieldState(string? authMode)
     {
         var mode = (authMode ?? "api_key").ToLowerInvariant();
@@ -814,7 +829,9 @@ This file is a living document about the human I work with. It helps me provide 
         AuthTokenCommandBox.IsEnabled = mode == "oauth_proxy_command";
     }
 
-    // ── Dreamer ──
+    /// <summary>
+    /// Loads the Dreamer configuration from the Hermes home config.yaml and applies its values to the Dreamer UI controls.
+    /// </summary>
     private void LoadDreamerSettings()
     {
         var cfgPath = Path.Combine(HermesEnvironment.HermesHomePath, "config.yaml");
@@ -826,6 +843,14 @@ This file is a living document about the human I work with. It helps me provide 
         DreamerDiscordChannelBox.Text = c.DiscordChannelId;
     }
 
+    /// <summary>
+    /// Persists the Dreamer settings from the UI into the application's "dreamer" configuration section and updates the status label.
+    /// </summary>
+    /// <remarks>
+    /// Reads the existing config.yaml to preserve values that are not supplied in the UI, serializes list fields (RSS feeds and digest times) as comma-separated strings, and saves the assembled key/value mapping via HermesEnvironment.SaveConfigSectionAsync. On success or failure, the method updates <c>DreamerSaveStatus</c> text and foreground color accordingly.
+    /// </remarks>
+    /// <param name="sender">The source of the event.</param>
+    /// <param name="e">Event data for the click event.</param>
     private async void SaveDreamerConfig_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -868,6 +893,11 @@ This file is a living document about the human I work with. It helps me provide 
         }
     }
 
+    /// <summary>
+    /// Ensures the "dreamer" directory exists under the Hermes home path and opens it in the system file explorer.
+    /// </summary>
+    /// <param name="sender">The source of the event.</param>
+    /// <param name="e">Event data for the routed event.</param>
     private void OpenDreamerRoom_Click(object sender, RoutedEventArgs e)
     {
         var dir = Path.Combine(HermesEnvironment.HermesHomePath, "dreamer");

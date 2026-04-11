@@ -84,7 +84,10 @@ public sealed class InsightsService
         }
     }
 
-    /// <summary>Record a session.</summary>
+    /// <summary>
+    /// Increments the total session count and records one session for the specified platform.
+    /// </summary>
+    /// <param name="platform">The platform identifier for the session (for example, "web" or "mobile").</param>
     public void RecordSession(string platform)
     {
         lock (_lock)
@@ -96,12 +99,33 @@ public sealed class InsightsService
         }
     }
 
-    /// <summary>Increment Dreamer background-worker counters (walks, digests, builds).</summary>
+    /// <summary>
+/// Increments the persisted Dreamer walks counter in the insights snapshot, initializing the Dreamer counters if they do not exist.
+/// </summary>
     public void RecordDreamerWalk() => BumpDreamer(d => d.Walks++);
-    public void RecordDreamerDigest() => BumpDreamer(d => d.Digests++);
-    public void RecordDreamerBuild() => BumpDreamer(d => d.Builds++);
-    public void RecordDreamerSignal() => BumpDreamer(d => d.Signals++);
+    /// <summary>
+/// Increments the Dreamer background-worker "Digests" counter in the persisted insights snapshot.
+/// </summary>
+public void RecordDreamerDigest() => BumpDreamer(d => d.Digests++);
+    /// <summary>
+/// Increments the persisted Dreamer "Builds" counter in the insights snapshot.
+/// </summary>
+/// <remarks>
+/// Initializes the Dreamer counters if absent and performs the update under the service's internal lock for thread safety.
+/// </remarks>
+public void RecordDreamerBuild() => BumpDreamer(d => d.Builds++);
+    /// <summary>
+/// Increments the persisted "Signals" counter in the Dreamer insight stats.
+/// </summary>
+/// <remarks>
+/// Lazily initializes the Dreamer stats if absent and performs the update under the service's internal lock for thread safety.
+/// </remarks>
+public void RecordDreamerSignal() => BumpDreamer(d => d.Signals++);
 
+    /// <summary>
+    /// Ensures the service's Dreamer stats object exists and applies the provided delegate to update it under the instance lock.
+    /// </summary>
+    /// <param name="bump">A delegate that receives the DreamerInsightStats instance and modifies one or more counters.</param>
     private void BumpDreamer(Action<DreamerInsightStats> bump)
     {
         lock (_lock)
