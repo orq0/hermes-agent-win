@@ -19,6 +19,7 @@ using Hermes.Agent.Soul;
 using Hermes.Agent.Tools;
 using Hermes.Agent.Gateway;
 using Hermes.Agent.Gateway.Platforms;
+using Hermes.Agent.Dreamer;
 using HermesDesktop.Services;
 using System;
 using System.Collections.Generic;
@@ -98,6 +99,7 @@ public partial class App : Application
         {
             hermesHome, projectDir,
             Path.Combine(hermesHome, "soul"),              // mistakes.jsonl, habits.jsonl
+            Path.Combine(hermesHome, "dreamer"),            // Dreamer room (walks, projects, inbox)
             Path.Combine(projectDir, "transcripts"),
             Path.Combine(projectDir, "memory"),
             Path.Combine(projectDir, "skills"),
@@ -245,6 +247,9 @@ public partial class App : Application
         var insightsDir = Path.Combine(projectDir, "analytics");
         services.AddSingleton(_ => new InsightsService(insightsDir));
 
+        // Dreamer (background free-association worker) — status for Dashboard; loop started post-build
+        services.AddSingleton(_ => new DreamerStatus());
+
         // Core agent — wired with all optional dependencies
         services.AddSingleton(sp => new Agent(
             sp.GetRequiredService<IChatClient>(),
@@ -303,7 +308,47 @@ public partial class App : Application
         // Start native C# gateway if platform tokens are configured
         StartNativeGateway(provider);
 
+        StartDreamerBackground(provider, hermesHome, projectDir);
+
         return provider;
+    }
+
+    /// <summary>Start the Dreamer background loop (sleeps when dreamer.enabled is false).</summary>
+    private static void StartDreamerBackground(IServiceProvider provider, string hermesHome, string projectDir)
+    {
+        try
+        {
+            var cfgPath = Path.Combine(hermesHome, "config.yaml");
+            var room = new DreamerRoom(hermesHome);
+            room.EnsureLayout();
+
+            var lf = provider.GetRequiredService<ILoggerFactory>();
+            var cfg0 = DreamerConfig.Load(cfgPath);
+            var walkClient = new OpenAiClient(cfg0.ToWalkLlmConfig(), new HttpClient { Timeout = TimeSpan.FromMinutes(4) });
+            var echoClient = new OpenAiClient(cfg0.ToEchoLlmConfig(), new HttpClient { Timeout = TimeSpan.FromMinutes(3) });
+            var rss = new RssFetcher(new HttpClient { Timeout = TimeSpan.FromMinutes(2) }, room, lf.CreateLogger<RssFetcher>());
+            var transcriptsDir = Path.Combine(projectDir, "transcripts");
+            var dreamer = new DreamerService(
+                hermesHome,
+                cfgPath,
+                transcriptsDir,
+                room,
+                walkClient,
+                echoClient,
+                provider.GetRequiredService<TranscriptStore>(),
+                provider.GetRequiredService<GatewayService>(),
+                provider.GetRequiredService<InsightsService>(),
+                provider.GetRequiredService<DreamerStatus>(),
+                rss,
+                lf.CreateLogger<DreamerService>(),
+                lf);
+
+            _ = Task.Run(() => dreamer.RunForeverAsync(CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Dreamer background start (non-fatal): {ex.Message}");
+        }
     }
 
     /// <summary>

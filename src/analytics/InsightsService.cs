@@ -96,6 +96,21 @@ public sealed class InsightsService
         }
     }
 
+    /// <summary>Increment Dreamer background-worker counters (walks, digests, builds).</summary>
+    public void RecordDreamerWalk() => BumpDreamer(d => d.Walks++);
+    public void RecordDreamerDigest() => BumpDreamer(d => d.Digests++);
+    public void RecordDreamerBuild() => BumpDreamer(d => d.Builds++);
+    public void RecordDreamerSignal() => BumpDreamer(d => d.Signals++);
+
+    private void BumpDreamer(Action<DreamerInsightStats> bump)
+    {
+        lock (_lock)
+        {
+            _data.Dreamer ??= new DreamerInsightStats();
+            bump(_data.Dreamer!);
+        }
+    }
+
     // ── Retrieval ──
 
     /// <summary>Get the full insights snapshot.</summary>
@@ -180,6 +195,16 @@ public sealed class InsightsData
     public Dictionary<string, ToolStats> ToolUsage { get; set; } = new();
     public Dictionary<string, DailyStats> DailyTokens { get; set; } = new();
     public Dictionary<string, int> SessionsByPlatform { get; set; } = new();
+    /// <summary>Optional counters for the Dreamer background worker.</summary>
+    public DreamerInsightStats? Dreamer { get; set; }
+}
+
+public sealed class DreamerInsightStats
+{
+    public long Walks { get; set; }
+    public long Digests { get; set; }
+    public long Builds { get; set; }
+    public long Signals { get; set; }
 }
 
 public sealed class ModelStats

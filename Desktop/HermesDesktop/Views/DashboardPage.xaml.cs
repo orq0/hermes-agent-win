@@ -1,6 +1,7 @@
 using HermesDesktop.Services;
 using Hermes.Agent.Analytics;
 using Hermes.Agent.Core;
+using Hermes.Agent.Dreamer;
 using Hermes.Agent.LLM;
 using Hermes.Agent.Skills;
 using Hermes.Agent.Soul;
@@ -27,6 +28,7 @@ public sealed partial class DashboardPage : Page
 {
     private static readonly ResourceLoader ResourceLoader = new();
     private readonly RuntimeStatusService _runtimeStatusService = App.Services.GetRequiredService<RuntimeStatusService>();
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _dreamerTimer;
 
     public DashboardPage()
     {
@@ -46,6 +48,31 @@ public sealed partial class DashboardPage : Page
         LoadInsights();
         await LoadRecentSessionsAsync();
         await RefreshRuntimeStatusAsync();
+        StartDreamerStatusRefresh();
+    }
+
+    private void StartDreamerStatusRefresh()
+    {
+        RefreshDreamerStatus();
+        _dreamerTimer = DispatcherQueue.CreateTimer();
+        _dreamerTimer.Interval = TimeSpan.FromSeconds(4);
+        _dreamerTimer.Tick += (_, _) => RefreshDreamerStatus();
+        _dreamerTimer.Start();
+    }
+
+    private void RefreshDreamerStatus()
+    {
+        var st = App.Services.GetService<DreamerStatus>();
+        if (st is null) return;
+        var s = st.GetSnapshot();
+        DreamerPhaseText.Text = $"Phase: {s.Phase}";
+        DreamerWalkCountText.Text = $"Walks: {s.WalkCount}";
+        DreamerSignalText.Text = string.IsNullOrEmpty(s.TopSignalSlug)
+            ? "Top signal: —"
+            : $"Top signal: {s.TopSignalSlug} ({s.TopSignalScore:F1})";
+        DreamerPostcardText.Text = string.IsNullOrWhiteSpace(s.LastPostcardPreview)
+            ? ""
+            : s.LastPostcardPreview;
     }
 
     // ── KPI Stats ──

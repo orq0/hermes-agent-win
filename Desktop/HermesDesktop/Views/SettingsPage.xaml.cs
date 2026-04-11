@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Hermes.Agent.Dreamer;
 using Hermes.Agent.LLM;
 using HermesDesktop.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,7 @@ public sealed partial class SettingsPage : Page
         LoadDisplaySettings();
         LoadExecutionSettings();
         LoadPluginSettings();
+        LoadDreamerSettings();
         await RefreshRuntimeStatusAsync();
     }
 
@@ -810,5 +812,67 @@ This file is a living document about the human I work with. It helps me provide 
         AuthSchemeBox.IsEnabled = usesProxyToken;
         AuthTokenEnvBox.IsEnabled = mode == "oauth_proxy_env";
         AuthTokenCommandBox.IsEnabled = mode == "oauth_proxy_command";
+    }
+
+    // ── Dreamer ──
+    private void LoadDreamerSettings()
+    {
+        var cfgPath = Path.Combine(HermesEnvironment.HermesHomePath, "config.yaml");
+        var c = DreamerConfig.Load(cfgPath);
+        DreamerEnabledToggle.IsOn = c.Enabled;
+        DreamerWalkIntervalBox.Value = c.WalkIntervalMinutes;
+        DreamerWalkModelBox.Text = c.WalkModel;
+        DreamerWalkBaseUrlBox.Text = c.WalkBaseUrl;
+        DreamerDiscordChannelBox.Text = c.DiscordChannelId;
+    }
+
+    private async void SaveDreamerConfig_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var cfgPath = Path.Combine(HermesEnvironment.HermesHomePath, "config.yaml");
+            var cur = DreamerConfig.Load(cfgPath);
+            var rss = string.Join(",", cur.RssFeeds);
+            var digest = string.Join(",", cur.DigestTimes);
+            var dict = new Dictionary<string, string>
+            {
+                ["enabled"] = DreamerEnabledToggle.IsOn ? "true" : "false",
+                ["walk_provider"] = cur.WalkProvider,
+                ["walk_model"] = string.IsNullOrWhiteSpace(DreamerWalkModelBox.Text) ? cur.WalkModel : DreamerWalkModelBox.Text.Trim(),
+                ["walk_base_url"] = string.IsNullOrWhiteSpace(DreamerWalkBaseUrlBox.Text) ? cur.WalkBaseUrl : DreamerWalkBaseUrlBox.Text.Trim(),
+                ["walk_temperature"] = cur.WalkTemperature.ToString(CultureInfo.InvariantCulture),
+                ["walk_max_tokens"] = cur.WalkMaxTokens.ToString(CultureInfo.InvariantCulture),
+                ["build_provider"] = cur.BuildProvider,
+                ["build_model"] = cur.BuildModel,
+                ["walk_interval_minutes"] = ((int)DreamerWalkIntervalBox.Value).ToString(CultureInfo.InvariantCulture),
+                ["digest_times"] = digest,
+                ["discord_channel_id"] = DreamerDiscordChannelBox.Text.Trim(),
+                ["trigger_threshold"] = cur.TriggerThreshold.ToString(CultureInfo.InvariantCulture),
+                ["min_walks_to_trigger"] = cur.MinWalksToTrigger.ToString(CultureInfo.InvariantCulture),
+                ["autonomy"] = cur.Autonomy,
+                ["input_transcripts"] = cur.InputTranscripts ? "true" : "false",
+                ["input_inbox"] = cur.InputInbox ? "true" : "false",
+                ["rss_feeds"] = rss
+            };
+            if (!string.IsNullOrWhiteSpace(cur.BuildBaseUrl))
+                dict["build_base_url"] = cur.BuildBaseUrl;
+
+            await HermesEnvironment.SaveConfigSectionAsync("dreamer", dict);
+            DreamerSaveStatus.Text = "Saved. Restart app to refresh Dreamer LLM clients.";
+            DreamerSaveStatus.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ConnectionOnlineBrush"];
+        }
+        catch (Exception ex)
+        {
+            DreamerSaveStatus.Text = $"Error: {ex.Message}";
+            DreamerSaveStatus.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ConnectionOfflineBrush"];
+        }
+    }
+
+    private void OpenDreamerRoom_Click(object sender, RoutedEventArgs e)
+    {
+        var dir = Path.Combine(HermesEnvironment.HermesHomePath, "dreamer");
+        Directory.CreateDirectory(dir);
+        var psi = new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true };
+        System.Diagnostics.Process.Start(psi);
     }
 }

@@ -64,6 +64,21 @@
                 </Border>
             </Grid>
 
+            <!-- Dreamer status -->
+            <Border Style="{StaticResource SurfaceCardStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Dreamer" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="DreamerPhaseText" Text="Phase: —" FontSize="13"
+                               Foreground="{StaticResource AppTextSecondaryBrush}"/>
+                    <TextBlock x:Name="DreamerWalkCountText" Text="Walks: —" FontSize="13"
+                               Foreground="{StaticResource AppTextSecondaryBrush}"/>
+                    <TextBlock x:Name="DreamerSignalText" Text="Top signal: —" FontSize="13"
+                               Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="DreamerPostcardText" Text="" FontSize="12"
+                               Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" MaxHeight="80"/>
+                </StackPanel>
+            </Border>
+
             <!-- ═══ Platforms & Model Row ═══ -->
             <Grid ColumnSpacing="20">
                 <Grid.ColumnDefinitions>
