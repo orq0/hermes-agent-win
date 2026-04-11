@@ -8,7 +8,7 @@
 
 **A native Windows agentic framework** built with WinUI 3 and .NET 10 — featuring runtime model swapping, 27+ tools with parallel execution, production hardening, a persistent soul identity system, 94 skills, and a wiki-based knowledge base.
 
-**Current version: v2.2.0** | [Changelog](#changelog) | [Discussion](https://github.com/RedWoodOG/Hermes-Desktop/discussions/10)
+**Current version: v2.2.1** | [Changelog](#changelog) | [Discussion](https://github.com/RedWoodOG/Hermes-Desktop/discussions/10)
 
 ## What This Is
 
@@ -152,9 +152,7 @@ With `TokenBudget` (8000 max, 6-turn window), `SessionState` tracking, and `Comp
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Windows App SDK 1.7](https://learn.microsoft.com/windows/apps/windows-app-sdk/)
 
-### Build and Run
-
-Recommended local dev path:
+### Fresh Install (recommended)
 
 ```powershell
 git clone https://github.com/RedWoodOG/Hermes-Desktop.git
@@ -162,22 +160,63 @@ cd Hermes-Desktop
 powershell -ExecutionPolicy Bypass -File .\Desktop\HermesDesktop\run-dev.ps1
 ```
 
-Manual fallback:
+The `run-dev.ps1` script builds, registers, and launches in one step.
+
+### Updating
 
 ```powershell
-dotnet build Desktop/HermesDesktop/HermesDesktop.csproj -c Debug -p:Platform=x64
-Add-AppxPackage -Register .\Desktop\HermesDesktop\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\AppxManifest.xml -ForceApplicationShutdown -ForceUpdateFromAnyVersion
+cd Hermes-Desktop
+git pull
+powershell -ExecutionPolicy Bypass -File .\Desktop\HermesDesktop\run-dev.ps1
+```
+
+### Clean Uninstall (remove previous version)
+
+If you're having issues or want a completely fresh install, run this **before** building the new version:
+
+```powershell
+# 1. Remove ALL registered Hermes Desktop app packages
+Get-AppxPackage *EDC29F63* | Remove-AppxPackage
+
+# 2. (Optional) Remove user data and config — only if you want a full reset
+# WARNING: This deletes your config, API keys, sessions, and memories
+# Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes"
+
+# 3. Clean build artifacts
+Remove-Item -Recurse -Force Desktop\HermesDesktop\bin -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force Desktop\HermesDesktop\obj -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force src\bin -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force src\obj -ErrorAction SilentlyContinue
+
+# 4. Rebuild and install fresh
+powershell -ExecutionPolicy Bypass -File .\Desktop\HermesDesktop\run-dev.ps1
+```
+
+To remove **only** the app package without deleting your config and data:
+
+```powershell
+Get-AppxPackage *EDC29F63* | Remove-AppxPackage
+```
+
+### Manual Build (if run-dev.ps1 doesn't work)
+
+```powershell
+dotnet build Desktop/HermesDesktop/HermesDesktop.csproj -c Debug
+cd Desktop\HermesDesktop\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64
+Add-AppxPackage -Register AppxManifest.xml
 Start-Process "shell:AppsFolder\EDC29F63-281C-4D34-8723-155C8122DEA2_1z32rh13vfry6!App"
 ```
 
-The active Windows desktop project is `Desktop/HermesDesktop/HermesDesktop.csproj`.
+### Troubleshooting
 
 If the app does not show a window after launch:
 
-- re-run `.\Desktop\HermesDesktop\run-dev.ps1` so the package path and launch checks happen in one step
-- check `%LOCALAPPDATA%\hermes\hermes-cs\logs\desktop-startup.log` for startup exceptions
-- check `C:\ProgramData\Microsoft\Windows\WER\ReportArchive` for Windows crash reports
-- temporarily close overlay/injection tools such as RTSS / MSI Afterburner and retry
+1. **Remove old packages first:** `Get-AppxPackage *EDC29F63* | Remove-AppxPackage`
+2. **Clean build:** Delete `bin/` and `obj/` folders, then rebuild
+3. **Check crash log:** `%LOCALAPPDATA%\hermes\hermes-cs\logs\desktop-startup.log`
+4. **Check Windows crash reports:** `C:\ProgramData\Microsoft\Windows\WER\ReportArchive`
+5. **Close overlay software:** MSI Afterburner, RTSS, and similar overlay/injection tools can interfere with WinUI apps — close them and retry
+6. **Verify .NET 10 SDK:** Run `dotnet --version` — should show `10.x.x`
 
 ### Configuration
 
@@ -250,7 +289,8 @@ HermesDesktop/
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v2.2.0** | 2026-04-10 | User Profile section in Settings (name, role, working style, project dir) |
+| **v2.2.1** | 2026-04-10 | Fix startup crash on fresh clone, safe file ops, one-click installer, clean uninstall instructions |
+| v2.2.0 | 2026-04-10 | User Profile section in Settings (name, role, working style, project dir) |
 | v2.1.1 | 2026-04-10 | Fix skills discovery (dynamic repo root), model dropdown (shows user config first), memory paths |
 | v2.1.0 | 2026-04-10 | Native C# gateway — Telegram and Discord work without Python CLI |
 | v2.0.1 | 2026-04-09 | Fix dark text theme, first-run skill copy, gateway requirement notice |
