@@ -8,6 +8,7 @@ public sealed class DreamerStatus
     private int _walkCount;
     private string _lastWalkSummary = "";
     private string _lastPostcardPreview = "";
+    private string _startupFailureMessage = "";
     private double _topSignalScore;
     private string _topSignalSlug = "";
 
@@ -20,6 +21,7 @@ public sealed class DreamerStatus
                 _walkCount,
                 _lastWalkSummary,
                 _lastPostcardPreview,
+                _startupFailureMessage,
                 _topSignalScore,
                 _topSignalSlug);
         }
@@ -28,6 +30,20 @@ public sealed class DreamerStatus
     public void SetPhase(string phase)
     {
         lock (_lock) { _phase = phase; }
+    }
+
+    public void ClearStartupFailure()
+    {
+        lock (_lock) { _startupFailureMessage = ""; }
+    }
+
+    public void SetStartupFailure(string message)
+    {
+        lock (_lock)
+        {
+            _phase = "startup-failed";
+            _startupFailureMessage = message;
+        }
     }
 
     public void AfterWalk(string walkPreview, int walkNumber, double topScore, string topSlug)
@@ -53,5 +69,6 @@ public readonly record struct DreamerStatusSnapshot(
     int WalkCount,
     string LastWalkSummary,
     string LastPostcardPreview,
+    string StartupFailureMessage,
     double TopSignalScore,
     string TopSignalSlug);

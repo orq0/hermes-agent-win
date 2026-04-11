@@ -1,0 +1,51 @@
+# MSIX signing: uses an ephemeral PFX generated in the job (see Generate test signing certificate).
+# Do not commit dev-msix.pfx; see Desktop/HermesDesktop/packaging/README.md.
+name: CI - Build and Package MSIX
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-msix:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore HermesDesktop.sln
+
+      - name: Build solution
+        run: dotnet build HermesDesktop.sln -c Release -r win-x64 --no-restore
+
+      - name: Generate test signing certificate (PowerShell)
+        shell: pwsh
+        run: |
+          $pwd = ConvertTo-SecureString -String "testpassword" -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=LocalTest" -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(2)
+          $pfxPath = "$env:GITHUB_WORKSPACE\tempCert.pfx"
+          Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath $pfxPath -Password $pwd
+          echo "thumbprint=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          echo "pfxPath=$pfxPath" >> $env:GITHUB_ENV
+
+      - name: Publish packaging project to create MSIX
+        shell: pwsh
+        run: |
+          msbuild Desktop\HermesDesktop.Package\HermesDesktop.Package.csproj /t:Restore;Publish /p:Configuration=Release /p:Platform=x64 /p:PackageCertificateThumbprint=${{ env.thumbprint }} /p:PackageCertificateKeyFile=${{ env.pfxPath }} /p:PackageCertificatePassword=testpassword
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-artifacts
+          path: |
+            Desktop/HermesDesktop.Package/bin/**/AppPackages/**
+            Desktop/HermesDesktop.Package/bin/**/Publish/**
+            Desktop/HermesDesktop.Package/bin/**/Release/**

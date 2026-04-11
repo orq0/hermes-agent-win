@@ -3,6 +3,9 @@ namespace Hermes.Agent.Analytics;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Hermes.Agent.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 // ══════════════════════════════════════════════
 // Insights / Analytics Service
@@ -19,13 +22,15 @@ using System.Text.Json.Serialization;
 public sealed class InsightsService
 {
     private readonly string _dataPath;
+    private readonly ILogger<InsightsService> _logger;
     private InsightsData _data;
     private readonly object _lock = new();
 
-    public InsightsService(string dataDir)
+    public InsightsService(string dataDir, ILogger<InsightsService>? logger = null)
     {
         Directory.CreateDirectory(dataDir);
         _dataPath = Path.Combine(dataDir, "insights.json");
+        _logger = logger ?? NullLogger<InsightsService>.Instance;
         _data = Load();
     }
 
@@ -101,6 +106,12 @@ public sealed class InsightsService
     public void RecordDreamerDigest() => BumpDreamer(d => d.Digests++);
     public void RecordDreamerBuild() => BumpDreamer(d => d.Builds++);
     public void RecordDreamerSignal() => BumpDreamer(d => d.Signals++);
+    public void RecordDreamerStartupFailure(Exception exception) => BumpDreamer(d =>
+    {
+        d.StartupFailures++;
+        d.LastStartupFailureUtc = DateTimeOffset.UtcNow;
+        d.LastStartupFailureMessage = exception.Message;
+    });
 
     private void BumpDreamer(Action<DreamerInsightStats> bump)
     {
@@ -158,7 +169,11 @@ public sealed class InsightsService
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             }) ?? new InsightsData();
         }
-        catch { return new InsightsData(); }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(_logger, ex, "loading insights data", $"path={_dataPath}");
+            return new InsightsData();
+        }
     }
 
     // ── Cost estimation (rough per-1M tokens) ──
@@ -205,6 +220,9 @@ public sealed class DreamerInsightStats
     public long Digests { get; set; }
     public long Builds { get; set; }
     public long Signals { get; set; }
+    public long StartupFailures { get; set; }
+    public DateTimeOffset? LastStartupFailureUtc { get; set; }
+    public string? LastStartupFailureMessage { get; set; }
 }
 
 public sealed class ModelStats

@@ -2,6 +2,7 @@ namespace Hermes.Agent.Dreamer;
 
 using System.Globalization;
 using Hermes.Agent.LLM;
+using Microsoft.Extensions.Logging;
 
 /// <summary>Configuration for the Dreamer background worker (dreamer: section in config.yaml).</summary>
 public sealed class DreamerConfig
@@ -16,14 +17,14 @@ public sealed class DreamerConfig
     public string BuildModel { get; set; } = "gpt-5.4-mini";
     public string? BuildBaseUrl { get; set; }
     public int WalkIntervalMinutes { get; set; } = 30;
-    public IReadOnlyList<string> DigestTimes { get; set; } = ["08:00", "12:00", "20:00"];
+    public IReadOnlyList<string> DigestTimes { get; set; } = new[] { "08:00", "12:00", "20:00" };
     public string DiscordChannelId { get; set; } = "";
     public double TriggerThreshold { get; set; } = 7.0;
     public int MinWalksToTrigger { get; set; } = 4;
     public string Autonomy { get; set; } = "full"; // full | drafts | ideas
     public bool InputTranscripts { get; set; } = true;
     public bool InputInbox { get; set; } = true;
-    public IReadOnlyList<string> RssFeeds { get; set; } = [];
+    public IReadOnlyList<string> RssFeeds { get; set; } = Array.Empty<string>();
 
     public static string ResolveHermesHome() =>
         Environment.GetEnvironmentVariable("HERMES_HOME") is { Length: > 0 } h
@@ -31,13 +32,23 @@ public sealed class DreamerConfig
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "hermes");
 
     /// <summary>Load dreamer: section from config.yaml (flat keys under dreamer:).</summary>
-    public static DreamerConfig Load(string configPath)
+    public static DreamerConfig Load(string configPath, ILogger? logger = null)
     {
         var c = new DreamerConfig();
-        if (!File.Exists(configPath))
-            return c;
+        Dictionary<string, string> kv;
+        try
+        {
+            if (!File.Exists(configPath))
+                return c;
 
-        var kv = ReadDreamerSection(configPath);
+            kv = ReadDreamerSection(configPath);
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+            logger?.LogWarning(ex, "Failed to load Dreamer config from {Path}; using defaults", configPath);
+            return c;
+        }
+
         if (kv.Count == 0)
             return c;
 

@@ -1,12 +1,19 @@
 namespace Hermes.Agent.Dreamer;
 
+using Microsoft.Extensions.Logging;
+
 /// <summary>Filesystem workspace under %LOCALAPPDATA%/hermes/dreamer/ (or HERMES_HOME/dreamer/).</summary>
 public sealed class DreamerRoom
 {
+    private readonly ILogger<DreamerRoom>? _logger;
+
     public string Root { get; }
 
-    public DreamerRoom(string hermesHome) =>
+    public DreamerRoom(string hermesHome, ILogger<DreamerRoom>? logger = null)
+    {
+        _logger = logger;
         Root = Path.Combine(hermesHome, "dreamer");
+    }
 
     public string WalksDir => Path.Combine(Root, "walks");
     public string ProjectsDir => Path.Combine(Root, "projects");
@@ -21,21 +28,39 @@ public sealed class DreamerRoom
     public void EnsureLayout()
     {
         foreach (var d in new[] { Root, WalksDir, ProjectsDir, InboxDir, InboxRssDir, FeedbackDir })
-            Directory.CreateDirectory(d);
+        {
+            try
+            {
+                Directory.CreateDirectory(d);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                _logger?.LogWarning(ex, "Failed to ensure Dreamer directory {Path}", d);
+            }
+        }
 
-        if (!File.Exists(SoulPath))
-            File.WriteAllText(SoulPath, DefaultSoulMarkdown);
-
-        if (!File.Exists(FascinationsPath))
-            File.WriteAllText(FascinationsPath,
-                "# Fascinations\n\nLong-running interests and threads the Dreamer notices.\n");
-
-        if (!File.Exists(SignalLogPath))
-            File.WriteAllText(SignalLogPath, "");
+        EnsureFileExists(SoulPath, DefaultSoulMarkdown);
+        EnsureFileExists(
+            FascinationsPath,
+            "# Fascinations\n\nLong-running interests and threads the Dreamer notices.\n");
+        EnsureFileExists(SignalLogPath, "");
     }
 
     public string NewWalkPath() =>
         Path.Combine(WalksDir, $"walk-{DateTime.UtcNow:yyyyMMdd-HHmmss}.md");
+
+    private void EnsureFileExists(string path, string content)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                File.WriteAllText(path, content);
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(ex, "Failed to ensure Dreamer file {Path}", path);
+        }
+    }
 
     private const string DefaultSoulMarkdown = """
 # Dreamer Soul

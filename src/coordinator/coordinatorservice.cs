@@ -76,7 +76,7 @@ public sealed class CoordinatorService
                     CoordinationId = coordinationId,
                     Status = "completed",
                     Output = "Task is simple enough to handle directly without decomposition.",
-                    SubtaskResults = []
+                    SubtaskResults = new Dictionary<string, string>()
                 };
             }
 
@@ -362,8 +362,11 @@ Rules:
 - Each subtask should be a focused, achievable unit of work";
 
         var response = await _chatClient.CompleteAsync(
-            [new Message { Role = "system", Content = GetCoordinatorSystemPrompt() },
-             new Message { Role = "user", Content = prompt }], ct);
+            new[]
+            {
+                new Message { Role = "system", Content = GetCoordinatorSystemPrompt() },
+                new Message { Role = "user", Content = prompt }
+            }, ct);
 
         return ParseSubtasks(response);
     }
@@ -426,7 +429,7 @@ WORKER RESULTS:
 Provide a unified, coherent summary of everything that was accomplished. Highlight any issues or incomplete items.";
 
         return await _chatClient.CompleteAsync(
-            [new Message { Role = "user", Content = prompt }], ct);
+            new[] { new Message { Role = "user", Content = prompt } }, ct);
     }
 
     // ── System Prompt ──
@@ -539,7 +542,7 @@ Provide a unified, coherent summary of everything that was accomplished. Highlig
                     try
                     {
                         return JsonSerializer.Deserialize<List<Subtask>>(candidate,
-                            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? [];
+                            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? new List<Subtask>();
                     }
                     catch (JsonException)
                     {
@@ -549,7 +552,7 @@ Provide a unified, coherent summary of everything that was accomplished. Highlig
             }
         }
 
-        return [];
+        return new List<Subtask>();
     }
 }
 
