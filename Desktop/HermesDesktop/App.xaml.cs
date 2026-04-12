@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Hermes.Agent.Core;
+using Hermes.Agent.Diagnostics;
 using Hermes.Agent.LLM;
 using Hermes.Agent.Transcript;
 using Hermes.Agent.Memory;
@@ -19,10 +20,12 @@ using Hermes.Agent.Soul;
 using Hermes.Agent.Tools;
 using Hermes.Agent.Gateway;
 using Hermes.Agent.Gateway.Platforms;
+using Hermes.Agent.Dreamer;
 using HermesDesktop.Services;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 
 namespace HermesDesktop;
@@ -30,13 +33,189 @@ namespace HermesDesktop;
 public partial class App : Application
 {
     private Window? _window;
+    private static readonly object _dreamerCtsLock = new();
+    private static readonly object _dreamerHttpClientsLock = new();
+    private static System.Threading.CancellationTokenSource? _dreamerCts;
+    private static DreamerHttpClients? _dreamerHttpClients;
 
     /// <summary>Global service provider for DI — accessed by pages via App.Services.</summary>
-    public static IServiceProvider Services { get; private set; } = null!;
+    /// <remarks>
+    /// Starts as <see cref="UninitializedAppServiceProvider"/> so <see cref="TryGetAppLogger"/> can call
+    /// <see cref="IServiceProvider.GetService"/> without throwing before <see cref="OnLaunched"/> builds the real provider.
+    /// <see cref="Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService"/> throws if invoked before services are registered.
+    /// </remarks>
+    public static IServiceProvider Services { get; private set; } = UninitializedAppServiceProvider.Instance;
 
     public App()
     {
         InitializeComponent();
+        this.UnhandledException += OnAppUnhandledException;
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+    }
+
+    private void OnAppUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        var logger = TryGetAppLogger();
+        var exception = e.Exception;
+
+        try
+        {
+            if (logger is not null)
+                logger.LogError(exception, "Unhandled UI exception");
+            else
+                BestEffort.LogFailure(null, exception, "handling unhandled UI exception");
+        }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(null, ex, "logging unhandled UI exception");
+            BestEffort.LogFailure(null, exception, "handling unhandled UI exception");
+        }
+
+        TryCancelDreamerCts(logger, "app unhandled exception");
+
+        if (exception is OperationCanceledException or ObjectDisposedException)
+            e.Handled = true;
+    }
+
+    private static void OnProcessExit(object? sender, EventArgs e)
+    {
+        var logger = TryGetAppLogger();
+        TryCancelAndDisposeDreamerCts(logger, "process exit");
+        TryDisposeDreamerHttpClients(logger, "process exit");
+    }
+
+    private static ILogger<App>? TryGetAppLogger()
+    {
+        if (ReferenceEquals(Services, UninitializedAppServiceProvider.Instance))
+            return null;
+
+        try
+        {
+            return Services.GetService<ILogger<App>>();
+        }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(null, ex, "resolving app logger");
+            return null;
+        }
+    }
+
+    private static void TryCancelDreamerCts(ILogger? logger, string reason)
+    {
+        System.Threading.CancellationTokenSource? dreamerCts;
+        lock (_dreamerCtsLock)
+        {
+            dreamerCts = _dreamerCts;
+        }
+
+        try
+        {
+            dreamerCts?.Cancel();
+        }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(logger, ex, "cancelling Dreamer cancellation token source", $"reason={reason}");
+        }
+    }
+
+    private static void TryCancelAndDisposeDreamerCts(ILogger? logger, string reason)
+    {
+        System.Threading.CancellationTokenSource? dreamerCts;
+        lock (_dreamerCtsLock)
+        {
+            dreamerCts = _dreamerCts;
+            _dreamerCts = null;
+        }
+
+        TryCancelAndDisposeDreamerCts(dreamerCts, logger, reason);
+    }
+
+    private static void TryCancelAndDisposeDreamerCts(System.Threading.CancellationTokenSource? dreamerCts, ILogger? logger, string reason)
+    {
+        if (dreamerCts is null)
+            return;
+
+        try
+        {
+            dreamerCts.Cancel();
+            dreamerCts.Dispose();
+        }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(logger, ex, "cancelling and disposing Dreamer cancellation token source", $"reason={reason}");
+
+            try
+            {
+                dreamerCts.Dispose();
+            }
+            catch (Exception disposeEx)
+            {
+                BestEffort.LogFailure(logger, disposeEx, "disposing Dreamer cancellation token source", $"reason={reason}");
+            }
+        }
+    }
+
+    private static void SetDreamerCts(System.Threading.CancellationTokenSource dreamerCts, ILogger? logger, string reason)
+    {
+        System.Threading.CancellationTokenSource? previousDreamerCts;
+        lock (_dreamerCtsLock)
+        {
+            previousDreamerCts = _dreamerCts;
+            _dreamerCts = dreamerCts;
+        }
+
+        TryCancelAndDisposeDreamerCts(previousDreamerCts, logger, reason);
+    }
+
+    private static void TryCancelAndDisposeDreamerCtsIfCurrent(System.Threading.CancellationTokenSource dreamerCts, ILogger? logger, string reason)
+    {
+        var shouldDispose = false;
+        lock (_dreamerCtsLock)
+        {
+            if (ReferenceEquals(_dreamerCts, dreamerCts))
+            {
+                _dreamerCts = null;
+                shouldDispose = true;
+            }
+        }
+
+        if (shouldDispose)
+            TryCancelAndDisposeDreamerCts(dreamerCts, logger, reason);
+    }
+
+    private static DreamerHttpClients GetOrCreateDreamerHttpClients()
+    {
+        lock (_dreamerHttpClientsLock)
+        {
+            _dreamerHttpClients ??= new DreamerHttpClients(
+                walk: DreamerHttpClientFactory.Create(TimeSpan.FromMinutes(4)),
+                echo: DreamerHttpClientFactory.Create(TimeSpan.FromMinutes(3)),
+                rss: DreamerHttpClientFactory.Create(TimeSpan.FromMinutes(2)));
+
+            return _dreamerHttpClients;
+        }
+    }
+
+    private static void TryDisposeDreamerHttpClients(ILogger? logger, string reason)
+    {
+        DreamerHttpClients? dreamerHttpClients;
+        lock (_dreamerHttpClientsLock)
+        {
+            dreamerHttpClients = _dreamerHttpClients;
+            _dreamerHttpClients = null;
+        }
+
+        if (dreamerHttpClients is null)
+            return;
+
+        try
+        {
+            dreamerHttpClients.Dispose();
+        }
+        catch (Exception ex)
+        {
+            BestEffort.LogFailure(logger, ex, "disposing Dreamer HTTP clients", $"reason={reason}");
+        }
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -65,6 +244,14 @@ public partial class App : Application
         {
             builder.AddDebug();
             builder.SetMinimumLevel(LogLevel.Information);
+            // Suppress only per-request HttpClient Information chatter. If richer HTTP diagnostics
+            // are enabled later, those categories can include sensitive request metadata; keeping the
+            // filter scoped preserves Warning/Error transport failures and any separate app-level
+            // connectivity telemetry from HermesChatService/RuntimeStatusService health checks.
+            builder.AddFilter((category, level) =>
+                category is null ||
+                !category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal) ||
+                level >= LogLevel.Warning);
             builder.AddProvider(new FileLoggerProvider(Path.Combine(logsDir, "hermes.log")));
         });
 
@@ -98,6 +285,7 @@ public partial class App : Application
         {
             hermesHome, projectDir,
             Path.Combine(hermesHome, "soul"),              // mistakes.jsonl, habits.jsonl
+            Path.Combine(hermesHome, "dreamer"),            // Dreamer room (walks, projects, inbox)
             Path.Combine(projectDir, "transcripts"),
             Path.Combine(projectDir, "memory"),
             Path.Combine(projectDir, "skills"),
@@ -121,7 +309,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Non-fatal: Could not create default soul/user files: {ex.Message}");
+            BestEffort.LogFailure(TryGetAppLogger(), ex, "creating default soul and user files");
         }
 
         // Transcript store
@@ -148,7 +336,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Non-fatal: Could not copy bundled skills: {ex.Message}");
+            BestEffort.LogFailure(TryGetAppLogger(), ex, "copying bundled skills");
         }
         services.AddSingleton(sp => new SkillManager(
             skillsDir,
@@ -243,7 +431,12 @@ public partial class App : Application
 
         // Analytics / Insights service
         var insightsDir = Path.Combine(projectDir, "analytics");
-        services.AddSingleton(_ => new InsightsService(insightsDir));
+        services.AddSingleton(sp => new InsightsService(
+            insightsDir,
+            sp.GetRequiredService<ILogger<InsightsService>>()));
+
+        // Dreamer (background free-association worker) — status for Dashboard; loop started post-build
+        services.AddSingleton(_ => new DreamerStatus());
 
         // Core agent — wired with all optional dependencies
         services.AddSingleton(sp => new Agent(
@@ -292,6 +485,7 @@ public partial class App : Application
         services.AddSingleton<RuntimeStatusService>();
 
         var provider = services.BuildServiceProvider();
+        Services = provider;
 
         // ── Post-build: Register all tools and connect MCP ──
         RegisterAllTools(provider);
@@ -303,7 +497,91 @@ public partial class App : Application
         // Start native C# gateway if platform tokens are configured
         StartNativeGateway(provider);
 
+        StartDreamerBackground(provider, hermesHome, projectDir);
+
         return provider;
+    }
+
+    /// <summary>Start the Dreamer background loop (sleeps when dreamer.enabled is false).</summary>
+    private static void StartDreamerBackground(IServiceProvider provider, string hermesHome, string projectDir)
+    {
+        var logger = provider.GetService<ILogger<App>>();
+        var dreamerStatus = provider.GetService<DreamerStatus>();
+        var insights = provider.GetService<InsightsService>();
+
+        try
+        {
+            var cfgPath = Path.Combine(hermesHome, "config.yaml");
+            var lf = provider.GetRequiredService<ILoggerFactory>();
+            var room = new DreamerRoom(hermesHome, lf.CreateLogger<DreamerRoom>());
+            room.EnsureLayout();
+
+            // Long-lived HttpClients for Dreamer. Do not attach logging handlers that record
+            // request/response headers — LLM calls carry API keys on every request.
+            // These clients are created with automatic decompression disabled, proxy usage
+            // disabled, and sanitized default headers before any request-specific auth headers
+            // are applied. Do not attach logging handlers that record request/response headers
+            // or full requests.
+            var dreamerHttpClients = GetOrCreateDreamerHttpClients();
+            var walkHttp = dreamerHttpClients.Walk;
+            var echoHttp = dreamerHttpClients.Echo;
+            var rssHttp = dreamerHttpClients.Rss;
+
+            // Factory methods to create fresh clients from current config
+            IChatClient CreateWalkClient(DreamerConfig cfg) => new OpenAiClient(cfg.ToWalkLlmConfig(), walkHttp);
+            IChatClient CreateEchoClient(DreamerConfig cfg) => new OpenAiClient(cfg.ToEchoLlmConfig(), echoHttp);
+
+            var rss = new RssFetcher(rssHttp, room, lf.CreateLogger<RssFetcher>());
+            var transcriptsDir = Path.Combine(projectDir, "transcripts");
+            var dreamer = new DreamerService(
+                hermesHome,
+                cfgPath,
+                transcriptsDir,
+                room,
+                CreateWalkClient,
+                CreateEchoClient,
+                provider.GetRequiredService<TranscriptStore>(),
+                provider.GetRequiredService<GatewayService>(),
+                provider.GetRequiredService<InsightsService>(),
+                provider.GetRequiredService<DreamerStatus>(),
+                rss,
+                lf.CreateLogger<DreamerService>(),
+                lf);
+
+            var dreamerCts = new System.Threading.CancellationTokenSource();
+            dreamerStatus?.ClearStartupFailure();
+            SetDreamerCts(dreamerCts, logger, "starting Dreamer background loop");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await dreamer.RunForeverAsync(dreamerCts.Token);
+                }
+                finally
+                {
+                    TryCancelAndDisposeDreamerCtsIfCurrent(dreamerCts, logger, "Dreamer background loop exit");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            dreamerStatus?.SetStartupFailure(ex.Message);
+            insights?.RecordDreamerStartupFailure(ex);
+
+            try
+            {
+                insights?.Save();
+            }
+            catch (Exception saveEx)
+            {
+                BestEffort.LogFailure(logger, saveEx, "persisting Dreamer startup failure insights");
+            }
+
+            if (logger is not null)
+                logger.LogError(ex, "Dreamer background start failed");
+            else
+                BestEffort.LogFailure(null, ex, "starting Dreamer background loop");
+        }
     }
 
     /// <summary>
@@ -334,8 +612,9 @@ public partial class App : Application
                         var result = await dialog.ShowAsync();
                         tcs.TrySetResult(result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        BestEffort.LogFailure(TryGetAppLogger(), ex, "showing permission prompt dialog", $"tool={toolName}");
                         tcs.TrySetResult(false);
                     }
                 });
@@ -453,12 +732,18 @@ public partial class App : Application
         foreach (var file in Directory.EnumerateFiles(source))
         {
             try { File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true); }
-            catch { /* Skip files that can't be copied — non-fatal */ }
+            catch (Exception ex)
+            {
+                BestEffort.LogFailure(TryGetAppLogger(), ex, "copying bundled skills file", $"file={file}");
+            }
         }
         foreach (var dir in Directory.EnumerateDirectories(source))
         {
             try { CopyDirectoryRecursive(dir, Path.Combine(destination, Path.GetFileName(dir))); }
-            catch { /* Skip directories that can't be copied — non-fatal */ }
+            catch (Exception ex)
+            {
+                BestEffort.LogFailure(TryGetAppLogger(), ex, "copying bundled skills directory", $"directory={dir}");
+            }
         }
     }
 
@@ -517,11 +802,15 @@ public partial class App : Application
 
             var tgToken = HermesEnvironment.ReadPlatformSetting("telegram", "token");
             if (!string.IsNullOrWhiteSpace(tgToken))
-                adapters.Add(new TelegramAdapter(tgToken));
+                adapters.Add(new TelegramAdapter(
+                    tgToken,
+                    logger: services.GetRequiredService<ILogger<TelegramAdapter>>()));
 
             var dcToken = HermesEnvironment.ReadPlatformSetting("discord", "token");
             if (!string.IsNullOrWhiteSpace(dcToken))
-                adapters.Add(new DiscordAdapter(dcToken));
+                adapters.Add(new DiscordAdapter(
+                    dcToken,
+                    logger: services.GetRequiredService<ILogger<DiscordAdapter>>()));
 
             if (adapters.Count > 0)
             {
@@ -534,7 +823,6 @@ public partial class App : Application
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Gateway start failed: {ex.Message}");
                         logger.LogError(ex, "Native gateway start failed");
                     }
                 });
@@ -546,7 +834,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Gateway initialization error: {ex.Message}");
+            BestEffort.LogFailure(TryGetAppLogger(), ex, "initializing native gateway");
         }
     }
 
@@ -593,5 +881,44 @@ public partial class App : Application
             var logger = services.GetRequiredService<ILogger<App>>();
             logger.LogWarning(ex, "MCP initialization failed, continuing without MCP tools");
         }
+    }
+
+    private sealed class DreamerHttpClients : IDisposable
+    {
+        public DreamerHttpClients(HttpClient walk, HttpClient echo, HttpClient rss)
+        {
+            Walk = walk;
+            Echo = echo;
+            Rss = rss;
+        }
+
+        public HttpClient Walk { get; }
+        public HttpClient Echo { get; }
+        public HttpClient Rss { get; }
+
+        public void Dispose()
+        {
+            DisposeClient(Walk);
+            DisposeClient(Echo);
+            DisposeClient(Rss);
+        }
+
+        private static void DisposeClient(HttpClient client)
+        {
+            client.CancelPendingRequests();
+            client.Dispose();
+        }
+    }
+
+    /// <summary>Sentinel <see cref="IServiceProvider"/> used only until DI is built in <see cref="OnLaunched"/>.</summary>
+    private sealed class UninitializedAppServiceProvider : IServiceProvider
+    {
+        public static readonly UninitializedAppServiceProvider Instance = new();
+
+        private UninitializedAppServiceProvider()
+        {
+        }
+
+        public object? GetService(Type serviceType) => null;
     }
 }

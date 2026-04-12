@@ -1,6 +1,8 @@
+using System.Globalization;
 using HermesDesktop.Services;
 using Hermes.Agent.Analytics;
 using Hermes.Agent.Core;
+using Hermes.Agent.Dreamer;
 using Hermes.Agent.LLM;
 using Hermes.Agent.Skills;
 using Hermes.Agent.Soul;
@@ -27,10 +29,27 @@ public sealed partial class DashboardPage : Page
 {
     private static readonly ResourceLoader ResourceLoader = new();
     private readonly RuntimeStatusService _runtimeStatusService = App.Services.GetRequiredService<RuntimeStatusService>();
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _dreamerTimer;
 
     public DashboardPage()
     {
         InitializeComponent();
+        this.Unloaded += OnPageUnloaded;
+    }
+
+    private void OnDreamerTimerTick(object? sender, object e)
+    {
+        RefreshDreamerStatus();
+    }
+
+    private void OnPageUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (_dreamerTimer is not null)
+        {
+            _dreamerTimer.Stop();
+            _dreamerTimer.Tick -= OnDreamerTimerTick;
+            _dreamerTimer = null;
+        }
     }
 
     // ── Data Properties (for x:Bind) ──
@@ -46,6 +65,51 @@ public sealed partial class DashboardPage : Page
         LoadInsights();
         await LoadRecentSessionsAsync();
         await RefreshRuntimeStatusAsync();
+        StartDreamerStatusRefresh();
+    }
+
+    private void StartDreamerStatusRefresh()
+    {
+        // Guard against duplicate timers (DispatcherQueueTimer has no IsEnabled; null means not created or already torn down)
+        if (_dreamerTimer is not null)
+            return;
+
+        RefreshDreamerStatus();
+        _dreamerTimer = DispatcherQueue.CreateTimer();
+        _dreamerTimer.Interval = TimeSpan.FromSeconds(4);
+        _dreamerTimer.Tick += OnDreamerTimerTick;
+        _dreamerTimer.Start();
+    }
+
+    private void RefreshDreamerStatus()
+    {
+        var st = App.Services.GetService<DreamerStatus>();
+        if (st is null) return;
+        var s = st.GetSnapshot();
+        var culture = CultureInfo.CurrentCulture;
+        DreamerPhaseText.Text = string.Format(culture, ResourceLoader.GetString("DashboardDreamerPhaseFormat"), s.Phase);
+        DreamerWalkCountText.Text = string.Format(culture, ResourceLoader.GetString("DashboardDreamerWalksFormat"), s.WalkCount);
+        DreamerSignalText.Text = string.IsNullOrEmpty(s.TopSignalSlug)
+            ? ResourceLoader.GetString("DashboardDreamerTopSignalEmpty")
+            : string.Format(culture, ResourceLoader.GetString("DashboardDreamerTopSignalFormat"), s.TopSignalSlug, s.TopSignalScore);
+        DreamerLocalDigestText.Text = string.IsNullOrWhiteSpace(s.LastLocalDigestHint)
+            ? ResourceLoader.GetString("DashboardDreamerLocalDigestEmpty")
+            : string.Format(culture, ResourceLoader.GetString("DashboardDreamerLocalDigestFormat"), s.LastLocalDigestHint);
+        DreamerPostcardText.Text = string.IsNullOrWhiteSpace(s.LastPostcardPreview)
+            ? ResourceLoader.GetString("DashboardDreamerPostcardEmpty")
+            : s.LastPostcardPreview.Trim();
+        var alertBrush = (Brush?)Application.Current.Resources["ConnectionOfflineBrush"];
+        var secondaryBrush = (Brush?)Application.Current.Resources["AppTextSecondaryBrush"];
+        if (!string.IsNullOrWhiteSpace(s.StartupFailureMessage))
+        {
+            DreamerPostcardText.Text = string.Format(culture, ResourceLoader.GetString("DashboardDreamerStartupIssueFormat"), s.StartupFailureMessage);
+            if (alertBrush is not null)
+                DreamerPostcardText.Foreground = alertBrush;
+        }
+        else if (secondaryBrush is not null)
+        {
+            DreamerPostcardText.Foreground = secondaryBrush;
+        }
     }
 
     // ── KPI Stats ──
@@ -67,7 +131,8 @@ public sealed partial class DashboardPage : Page
 
         // Active soul
         var profileManager = App.Services?.GetService<AgentProfileManager>();
-        ActiveSoulText.Text = profileManager?.GetActiveProfileName() ?? "Default";
+        ActiveSoulText.Text = profileManager?.GetActiveProfileName()
+            ?? ResourceLoader.GetString("DashboardSoulDefaultProfile");
     }
 
     // ── Platform Badges ──
@@ -78,20 +143,20 @@ public sealed partial class DashboardPage : Page
         ServiceBadges.Children.Clear();
 
         // Messaging platforms
-        AddBadge(PlatformBadges, "Telegram", HermesEnvironment.TelegramConfigured, "#2AABEE");
-        AddBadge(PlatformBadges, "Discord", HermesEnvironment.DiscordConfigured, "#5865F2");
-        AddBadge(PlatformBadges, "Slack", HermesEnvironment.SlackConfigured, "#4A154B");
-        AddBadge(PlatformBadges, "WhatsApp", HermesEnvironment.WhatsAppConfigured, "#25D366");
-        AddBadge(PlatformBadges, "Matrix", HermesEnvironment.MatrixConfigured, "#0DBD8B");
-        AddBadge(PlatformBadges, "Webhook", HermesEnvironment.WebhookConfigured, "#F59E0B");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeTelegram"), HermesEnvironment.TelegramConfigured, "#2AABEE");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeDiscord"), HermesEnvironment.DiscordConfigured, "#5865F2");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeSlack"), HermesEnvironment.SlackConfigured, "#4A154B");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeWhatsApp"), HermesEnvironment.WhatsAppConfigured, "#25D366");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeMatrix"), HermesEnvironment.MatrixConfigured, "#0DBD8B");
+        AddBadge(PlatformBadges, ResourceLoader.GetString("BadgeWebhook"), HermesEnvironment.WebhookConfigured, "#F59E0B");
 
         // Services
-        AddBadge(ServiceBadges, "Memory", true, "#6BCB77");
-        AddBadge(ServiceBadges, "Skills", (App.Services?.GetService<SkillManager>()?.ListSkills().Count ?? 0) > 0, "#818CF8");
-        AddBadge(ServiceBadges, "Dream", true, "#C084FC");
+        AddBadge(ServiceBadges, ResourceLoader.GetString("BadgeMemory"), true, "#6BCB77");
+        AddBadge(ServiceBadges, ResourceLoader.GetString("BadgeSkills"), (App.Services?.GetService<SkillManager>()?.ListSkills().Count ?? 0) > 0, "#818CF8");
+        AddBadge(ServiceBadges, ResourceLoader.GetString("BadgeDream"), true, "#C084FC");
 
         var soulService = App.Services?.GetService<SoulService>();
-        AddBadge(ServiceBadges, "Soul", soulService is not null && !soulService.IsFirstRun(), "#FFD700");
+        AddBadge(ServiceBadges, ResourceLoader.GetString("BadgeSoul"), soulService is not null && !soulService.IsFirstRun(), "#FFD700");
     }
 
     private static void AddBadge(StackPanel parent, string label, bool active, string colorHex)
@@ -160,7 +225,7 @@ public sealed partial class DashboardPage : Page
                 if (messages.Count == 0) continue;
 
                 var firstUser = messages.FirstOrDefault(m => m.Role == "user");
-                var preview = firstUser?.Content ?? "(no messages)";
+                var preview = firstUser?.Content ?? ResourceLoader.GetString("DashboardSessionNoMessages");
                 if (preview.Length > 80) preview = preview[..80] + "...";
 
                 var lastMsg = messages[^1];
@@ -169,14 +234,17 @@ public sealed partial class DashboardPage : Page
                 items.Add(new SessionDisplayItem
                 {
                     Preview = preview,
-                    MessageCount = $"{messages.Count} msgs",
+                    MessageCount = string.Format(CultureInfo.CurrentCulture, ResourceLoader.GetString("DashboardSessionMessageCountFormat"), messages.Count),
                     TimeAgo = FormatTimeAgo(age),
                     StatusColor = age.TotalMinutes < 5
                         ? new SolidColorBrush(ColorHelper.FromArgb(255, 34, 197, 94))
                         : new SolidColorBrush(ColorHelper.FromArgb(255, 100, 100, 100))
                 });
             }
-            catch { /* skip unreadable sessions */ }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"DashboardPage skipping unreadable session {id}: {ex}");
+            }
         }
 
         RecentSessionsList.ItemsSource = items;
@@ -206,21 +274,25 @@ public sealed partial class DashboardPage : Page
 
     private async void TestConnection_Click(object sender, RoutedEventArgs e)
     {
-        TestConnectionResult.Text = "Testing...";
+        TestConnectionResult.Text = ResourceLoader.GetString("DashboardTestTesting");
         try
         {
             var chatClient = App.Services?.GetService<IChatClient>();
-            if (chatClient is null) { TestConnectionResult.Text = "Not configured"; return; }
+            if (chatClient is null)
+            {
+                TestConnectionResult.Text = ResourceLoader.GetString("DashboardTestNotConfigured");
+                return;
+            }
 
             var messages = new List<Message> { new() { Role = "user", Content = "Reply with exactly: OK" } };
             var result = await chatClient.CompleteAsync(messages, CancellationToken.None);
-            TestConnectionResult.Text = $"Connected — {result.Trim()}";
+            TestConnectionResult.Text = string.Format(CultureInfo.CurrentCulture, ResourceLoader.GetString("DashboardTestSuccessFormat"), result.Trim());
             TestConnectionResult.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 34, 197, 94));
             await RefreshRuntimeStatusAsync();
         }
         catch (Exception ex)
         {
-            TestConnectionResult.Text = $"Failed: {ex.Message}";
+            TestConnectionResult.Text = string.Format(CultureInfo.CurrentCulture, ResourceLoader.GetString("DashboardTestFailedFormat"), ex.Message);
             TestConnectionResult.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 239, 68, 68));
             await RefreshRuntimeStatusAsync();
         }
@@ -247,7 +319,7 @@ public sealed partial class DashboardPage : Page
             totalToolCalls += ts.TotalCalls;
         InsightsToolCallsText.Text = totalToolCalls.ToString("N0");
 
-        InsightsCostText.Text = $"${data.EstimatedCostUsd:F4}";
+        InsightsCostText.Text = string.Format(CultureInfo.CurrentCulture, "{0:C4}", data.EstimatedCostUsd);
 
         TopToolsList.Children.Clear();
         var topTools = data.ToolUsage
@@ -259,7 +331,8 @@ public sealed partial class DashboardPage : Page
             var avgMs = kv.Value.TotalCalls > 0 ? kv.Value.TotalDurationMs / kv.Value.TotalCalls : 0;
             TopToolsList.Children.Add(new TextBlock
             {
-                Text = $"{kv.Key}: {kv.Value.TotalCalls} calls • {avgMs} ms avg",
+                Text = string.Format(CultureInfo.CurrentCulture, ResourceLoader.GetString("DashboardTopToolLineFormat"),
+                    kv.Key, kv.Value.TotalCalls, avgMs),
                 Foreground = (Brush)Application.Current.Resources["AppTextSecondaryBrush"],
                 FontSize = 12,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -281,12 +354,13 @@ public sealed partial class DashboardPage : Page
 
     // ── Helpers ──
 
-    private static string FormatTimeAgo(TimeSpan age)
+    private string FormatTimeAgo(TimeSpan age)
     {
-        if (age.TotalSeconds < 60) return "now";
-        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m";
-        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h";
-        return $"{(int)age.TotalDays}d";
+        var culture = CultureInfo.CurrentCulture;
+        if (age.TotalSeconds < 60) return ResourceLoader.GetString("DashboardTimeAgoNow");
+        if (age.TotalMinutes < 60) return string.Format(culture, ResourceLoader.GetString("DashboardTimeAgoMinutesFormat"), (int)age.TotalMinutes);
+        if (age.TotalHours < 24) return string.Format(culture, ResourceLoader.GetString("DashboardTimeAgoHoursFormat"), (int)age.TotalHours);
+        return string.Format(culture, ResourceLoader.GetString("DashboardTimeAgoDaysFormat"), (int)age.TotalDays);
     }
 
     private static Windows.UI.Color ParseColor(string hex)
