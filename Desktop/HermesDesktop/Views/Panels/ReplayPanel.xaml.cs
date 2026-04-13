@@ -179,7 +179,9 @@ public sealed partial class ReplayPanel : UserControl
         // chronologically (oldest → newest) so the user watches the agent's
         // work unfold in the same order it actually happened. Snapshot to a
         // local list so an Activities mutation mid-playback can't desync us.
-        var ordered = Activities.OrderBy(a => a.Timestamp).ToList();
+        // Sort by Timestamp first, then by Sequence to resolve collisions and
+        // maintain stable insertion order.
+        var ordered = Activities.OrderBy(a => a.Timestamp).ThenBy(a => a.Sequence).ToList();
         foreach (var item in ordered)
         {
             ct.ThrowIfCancellationRequested();

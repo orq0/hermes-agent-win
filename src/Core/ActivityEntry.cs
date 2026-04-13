@@ -1,11 +1,16 @@
+using System.Threading;
+
 namespace Hermes.Agent.Core;
 
 public enum ActivityStatus { Running, Success, Failed, Denied }
 
 public sealed class ActivityEntry
 {
+    private static long _nextActivitySequence = 0;
+
     public string Id { get; init; } = Guid.NewGuid().ToString("N")[..8];
     public DateTime Timestamp { get; init; } = DateTime.UtcNow;
+    public long Sequence { get; init; } = Interlocked.Increment(ref _nextActivitySequence);
     public long DurationMs { get; set; }
     public required string ToolName { get; init; }
     public string? ToolCallId { get; init; }

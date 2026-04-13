@@ -122,7 +122,10 @@ public sealed class ImageAttachment
     /// <summary>MIME type, e.g. "image/png" or "image/jpeg".</summary>
     public required string MediaType { get; init; }
 
-    /// <summary>Raw base64 string (no "data:" prefix, no padding rules).</summary>
+    /// <summary>
+    /// Raw base64 string (no "data:" prefix) following RFC 4648 with standard '=' padding preserved.
+    /// The value must be properly padded Base64 compatible with Convert.FromBase64String (length divisible by 4).
+    /// </summary>
     public required string Base64Data { get; init; }
 
     /// <summary>Optional source filename for display in the UI / logs.</summary>
@@ -215,8 +218,19 @@ Area — Claude Code style" StackPanel). Changes:
    image bytes don't end up as garbage text in the prompt box.
 
 3. **Drag-drop handler**: subscribe `PromptTextBox.DragOver` and
-   `PromptTextBox.Drop`. Accept files with image extensions, read them,
-   base64-encode.
+   `PromptTextBox.Drop`. SECURITY: Do NOT rely on file extensions alone.
+   The Drop handler must:
+   - First enforce a raw-byte size cap before reading the full file
+   - Validate file type by inspecting magic bytes/MIME signature (PNG/JPEG/GIF headers)
+     before any base64 or full in-memory operations
+   - Perform safe/streaming decode to read image dimensions and enforce maximum
+     pixel count and dimension limits (reject if width*height or either side exceeds
+     thresholds) to prevent decompression-bomb attacks
+   - Strip/validate metadata
+   - Only then perform the in-memory/base64 encode
+   - Log all failures with clear error states
+   - Centralize these checks into a reusable validation helper used by
+     PromptTextBox.Drop and any related image intake code for consistency
 
 4. **Pending attachments strip**: a horizontal `ItemsRepeater` above the
    prompt textbox showing thumbnails of attachments staged for the next
@@ -258,6 +272,43 @@ toast "Image too large — please resize before sending". Reject the message
 send if total attachments for the message exceed **20 MB** decoded. These
 are arbitrary but generous defaults; expose them in `config.yaml` under a
 new `vision:` section if users complain.
+
+### Privacy & Retention
+
+Screenshots may contain PII, secrets, or sensitive data. The following
+protections and policies apply:
+
+- **Encryption at rest**: Optional toggle (`vision.encryption_enabled` in
+  `config.yaml`) to encrypt inline base64 attachments in the transcript JSON
+  using platform-native credential storage (Windows DPAPI / macOS Keychain).
+  Default: disabled (plain base64) for simplicity and portability.
+
+- **Retention policy**: Configurable GC for transcript attachments via
+  `vision.retention_days` in `config.yaml`. Attachments older than the
+  retention window are stripped from transcripts during periodic cleanup.
+  Default: no automatic deletion (manual session management).
+
+- **Maximum attachment size**: `vision.max_attachment_size_mb` in
+  `config.yaml` controls the per-image size cap. Default: 5 MB decoded.
+
+- **Export warning**: Session export UI must display a clear warning that
+  exported transcripts may contain screenshots with PII/secrets. Users
+  should review attachments before sharing.
+
+- **Security guidance**: See `security.instructions.md` for additional
+  guidance on input validation, avoiding hard-coded secrets, and least
+  privilege when handling user-provided images.
+
+**Proposed config.yaml keys:**
+```yaml
+vision:
+  encryption_enabled: false        # Encrypt attachments at rest
+  retention_days: 0                # Auto-delete attachments older than N days (0 = never)
+  max_attachment_size_mb: 5        # Per-image size cap
+```
+
+Cross-reference: `security.instructions.md` (no hard-coded secrets, input
+validation, least privilege).
 
 **Alternative (rejected):** writing images to
 `%LOCALAPPDATA%\hermes\images\` with a content hash and storing only the

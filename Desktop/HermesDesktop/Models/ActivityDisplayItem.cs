@@ -25,6 +25,7 @@ public sealed class ActivityDisplayItem : INotifyPropertyChanged
     {
         Id = entry.Id;
         Timestamp = entry.Timestamp;
+        Sequence = entry.Sequence;
         ToolName = entry.ToolName;
         ToolCallId = entry.ToolCallId;
         InputSummary = entry.InputSummary;
@@ -39,6 +40,7 @@ public sealed class ActivityDisplayItem : INotifyPropertyChanged
 
     public string Id { get; }
     public DateTime Timestamp { get; }
+    public long Sequence { get; }
     public string ToolName { get; }
     public string? ToolCallId { get; }
     public string InputSummary { get; }
