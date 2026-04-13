@@ -67,7 +67,7 @@ Write-Host ""
 Write-Host "=== Build gate (dotnet build -c $Configuration) ===" -ForegroundColor Cyan
 dotnet build $csproj -c $Configuration -p:Platform=$Platform
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Build failed — fix the errors above before publishing."
+    Write-Error "Build failed - fix the errors above before publishing."
 }
 
 # --- 2. Publish (self-contained, trimming OFF to avoid WinUI runtime crashes) ---
@@ -86,6 +86,13 @@ $publishArgs = @(
     "-p:WindowsPackageType=None",
     "-p:WindowsAppSDKSelfContained=true",
     "-p:WindowsAppSdkDeploymentManagerInitialize=false",
+    # PublishTrimmed MUST stay false: WinUI 3 / WinApp SDK 1.7 compiled bindings
+    # (x:Bind with x:DataType) and XamlTypeInfoProvider activation are not trim-safe
+    # and the linker silently strips members the activator needs at runtime,
+    # producing "Cannot create instance of type <UserControl>" XamlParseException
+    # at startup. Pass explicitly so a future csproj edit can't silently re-enable
+    # trimming for the portable release.
+    "-p:PublishTrimmed=false",
     "-o", $OutputDir,
     "-v:minimal"
 )
@@ -95,7 +102,7 @@ if ($Configuration -eq "Release") {
 }
 
 Write-Host ""
-Write-Host "Publishing Hermes Desktop — portable, $rid, $Configuration ..." -ForegroundColor Cyan
+Write-Host "Publishing Hermes Desktop - portable, $rid, $Configuration ..." -ForegroundColor Cyan
 Write-Host "Output: $OutputDir" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -139,5 +146,5 @@ if ($Zip) {
     Write-Host ""
 }
 
-Write-Host "Users can run HermesDesktop.exe directly — no .NET SDK, no MSIX, no Windows App Runtime install needed." -ForegroundColor Cyan
-Write-Host "First run creates %LOCALAPPDATA%\hermes with config, memory, and logs." -ForegroundColor DarkGray
+Write-Host "Users can run HermesDesktop.exe directly - no .NET SDK, no MSIX, no Windows App Runtime install needed." -ForegroundColor Cyan
+Write-Host 'First run creates %LOCALAPPDATA%\hermes with config, memory, and logs.' -ForegroundColor DarkGray
