@@ -216,4 +216,59 @@ public class PermissionManagerTests
         Assert.AreEqual(PermissionBehavior.Ask, decision.Behavior);
         StringAssert.Contains(decision.Message ?? string.Empty, "Unknown mode");
     }
+
+    [TestMethod]
+    public async Task AddAlwaysAllowRule_DefaultMode_PreventsFuturePermissionPrompts()
+    {
+        var manager = CreateManager(PermissionMode.Default);
+        var added = manager.AddAlwaysAllowRule("write_file");
+
+        var decision = await manager.CheckPermissionsAsync("write_file", "{\"path\":\"x.txt\"}", CancellationToken.None);
+
+        Assert.IsTrue(added);
+        Assert.AreEqual(PermissionBehavior.Allow, decision.Behavior);
+    }
+
+    [TestMethod]
+    public void AddAlwaysAllowRule_DuplicateRule_ReturnsFalse()
+    {
+        var manager = CreateManager(PermissionMode.Default);
+
+        var first = manager.AddAlwaysAllowRule("bash");
+        var second = manager.AddAlwaysAllowRule("bash");
+
+        Assert.IsTrue(first);
+        Assert.IsFalse(second);
+    }
+
+    [TestMethod]
+    public void AddAlwaysAllowRule_InvalidToolName_ThrowsArgumentException()
+    {
+        var manager = CreateManager(PermissionMode.Default);
+
+        Assert.ThrowsException<ArgumentException>(() => manager.AddAlwaysAllowRule("   "));
+    }
+
+    [TestMethod]
+    public void HasAlwaysAllowRule_RespectsCaseInsensitiveRuleMatching()
+    {
+        var manager = CreateManager(PermissionMode.Default);
+        manager.AddAlwaysAllowRule("write_file");
+
+        Assert.IsTrue(manager.HasAlwaysAllowRule("WRITE_FILE"));
+    }
+
+    [TestMethod]
+    public void ClearAlwaysAllowRules_RemovesAllRememberedRules()
+    {
+        var manager = CreateManager(PermissionMode.Default);
+        manager.AddAlwaysAllowRule("write_file");
+        manager.AddAlwaysAllowRule("bash");
+
+        manager.ClearAlwaysAllowRules();
+
+        Assert.IsFalse(manager.HasAlwaysAllowRule("write_file"));
+        Assert.IsFalse(manager.HasAlwaysAllowRule("bash"));
+        Assert.AreEqual(0, manager.GetAlwaysAllowRulesSnapshot().Count);
+    }
 }
