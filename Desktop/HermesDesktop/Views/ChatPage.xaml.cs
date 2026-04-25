@@ -292,20 +292,27 @@ public sealed partial class ChatPage : Page
 
     private async void PromptTextBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (e.Key != Windows.System.VirtualKey.Enter) return;
+    if (e.Key != Windows.System.VirtualKey.Enter)
+        return;
 
-        var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
-        if (shift.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
-        {
-            // Shift+Enter → newline (AcceptsReturn handles this natively)
-            return;
-        }
+    // ✅ Correct WinUI way to detect Shift
+    var shiftDown =
+        Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(
+            Windows.System.VirtualKey.Shift
+        ).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
-        // Enter → send (prevent the newline from being inserted)
-        e.Handled = true;
-        await SendPromptAsync();
+    if (shiftDown)
+    {
+        // Shift+Enter → allow newline
+        return;
     }
 
+    // Enter → send
+    e.Handled = true;
+    await SendPromptAsync();
+    }
+
+    
     private void PromptTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SendButton.IsEnabled = !string.IsNullOrWhiteSpace(PromptTextBox.Text) && !_isBusy;

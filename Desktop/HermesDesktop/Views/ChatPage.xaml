@@ -124,7 +124,7 @@
 
                             <TextBox x:Name="PromptTextBox"
                                      x:Uid="ChatPromptTextBox"
-                                     AcceptsReturn="True"
+                                     AcceptsReturn="False"
                                      MaxHeight="200" MinHeight="36"
                                      Background="Transparent"
                                      BorderThickness="0"
