@@ -47,3 +47,5 @@ hermes-agent-repo/
 /hermes-forensic-report.md
 /hermes-code-patterns.md
 /hermes-complete-docs.md
+SecretDetectorTests.cs
+Desktop/HermesDesktop.Tests/Security/
