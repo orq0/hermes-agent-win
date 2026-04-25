@@ -179,7 +179,16 @@ public sealed class OpenAiClient : IChatClient
 
     private object BuildPayload(IEnumerable<Message> messages, object? tools, bool stream)
     {
-        var msgs = messages.Select(m =>
+        // Ensure the first message is system role for providers that require it (e.g. llama.cpp).
+        // session.Messages may lack a system message when ContextManager is disabled or when
+        // resuming a session from transcript (ephemeral system messages are not persisted).
+        var msgList = messages as List<Message> ?? messages.ToList();
+        if (msgList.Count > 0 && !string.Equals(msgList[0].Role, "system", StringComparison.Ordinal))
+        {
+            msgList.Insert(0, new Message { Role = "system", Content = "" });
+        }
+
+        var msgs = msgList.Select(m =>
         {
             // Tool result message
             if (m.Role == "tool")

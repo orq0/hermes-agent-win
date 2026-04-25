@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Hermes.Agent.Security;
 
 /// <summary>

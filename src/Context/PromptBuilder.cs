@@ -68,63 +68,51 @@ public sealed class PromptBuilder
     ///   [M+1] user: current message
     /// </summary>
     public List<Message> ToOpenAiMessages(PromptPacket packet)
+{
+    var messages = new List<Message>();
+
+    // ---- SINGLE SYSTEM BLOCK (llama-safe) ----
+    var systemParts = new List<string>();
+
+    if (!string.IsNullOrWhiteSpace(packet.SoulContext))
+        systemParts.Add(packet.SoulContext);
+
+    systemParts.Add(packet.SystemPrompt);
+
+    if (!string.IsNullOrEmpty(packet.SessionStateJson) && packet.SessionStateJson != "{}")
+        systemParts.Add($"[Session State]\n{packet.SessionStateJson}");
+
+    if (packet.RetrievedContext is { Count: > 0 })
+        systemParts.Add("[Retrieved Context]\n" + string.Join("\n---\n", packet.RetrievedContext));
+
+    messages.Add(new Message
     {
-        var messages = new List<Message>();
+        Role = "system",
+        Content = string.Join("\n\n", systemParts)
+    });
 
-        // Layer 0: Soul context (identity, user profile, project rules, learned behaviors)
-        // Changes extremely rarely — excellent cache anchor. Injected before system prompt.
-        if (!string.IsNullOrWhiteSpace(packet.SoulContext))
+    // ---- CONVERSATION HISTORY ----
+    if (packet.RecentTurns is { Count: > 0 })
+    {
+        foreach (var m in packet.RecentTurns)
         {
-            messages.Add(new Message
-            {
-                Role = "system",
-                Content = packet.SoulContext
-            });
+            // extra safety: never allow system leakage
+            if (m.Role == "system")
+                continue;
+
+            messages.Add(m);
         }
-
-        // Layer 1: Stable system prompt (cache anchor — never changes)
-        messages.Add(new Message
-        {
-            Role = "system",
-            Content = packet.SystemPrompt
-        });
-
-        // Layer 2: Session state (changes slowly — good for incremental caching)
-        if (!string.IsNullOrEmpty(packet.SessionStateJson) && packet.SessionStateJson != "{}")
-        {
-            messages.Add(new Message
-            {
-                Role = "system",
-                Content = $"[Session State]\n{packet.SessionStateJson}"
-            });
-        }
-
-        // Layer 3: Retrieved context (only present when relevant)
-        if (packet.RetrievedContext is { Count: > 0 })
-        {
-            var contextBlock = string.Join("\n---\n", packet.RetrievedContext);
-            messages.Add(new Message
-            {
-                Role = "system",
-                Content = $"[Retrieved Context]\n{contextBlock}"
-            });
-        }
-
-        // Layer 4: Recent conversation turns (sliding window)
-        if (packet.RecentTurns is { Count: > 0 })
-        {
-            messages.AddRange(packet.RecentTurns);
-        }
-
-        // Layer 5: Current user message
-        messages.Add(new Message
-        {
-            Role = "user",
-            Content = packet.CurrentUserMessage
-        });
-
-        return messages;
     }
+
+    // ---- CURRENT USER MESSAGE ----
+    messages.Add(new Message
+    {
+        Role = "user",
+        Content = packet.CurrentUserMessage
+    });
+
+    return messages;
+}
 
     private static string? NullIfEmpty(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;

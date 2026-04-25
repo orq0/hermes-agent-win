@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Hermes.Agent.Security;
 
 /// <summary>
@@ -29,7 +31,7 @@ public abstract class RegexSecretPattern : ISecretPattern
         _regex = new Regex(pattern, options);
     }
 
-    public bool Matches(string text) => _regex.IsMatch(text);
+    public virtual bool Matches(string text) => _regex.IsMatch(text);
 
     public abstract string ApplyRedaction(string text);
 }
