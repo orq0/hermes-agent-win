@@ -1,3 +1,5 @@
+This is a clone from https://github.com/RedWoodOG/Hermes-Desktop
+
 # Hermes Desktop Updated
 
 <p align="center">
