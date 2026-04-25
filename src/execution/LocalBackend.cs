@@ -25,12 +25,16 @@ public sealed partial class LocalBackend : IExecutionBackend
         var timeout = timeoutMs ?? _config.DefaultTimeoutMs;
         var sw = Stopwatch.StartNew();
 
-        // Determine shell
+        // Determine shell — command passed as a single argument via ArgumentList
+        // to prevent shell injection. The shell still parses the command (as intended),
+        // but no injection is possible because the command cannot terminate the -c arg.
         var isWindows = OperatingSystem.IsWindows();
+        var shell = isWindows ? "cmd.exe" : "/bin/bash";
+        var shellArg = isWindows ? "/c" : "-c";
         var psi = new ProcessStartInfo
         {
-            FileName = isWindows ? "cmd.exe" : "/bin/bash",
-            Arguments = isWindows ? $"/c {command}" : $"-c {command}",
+            FileName = shell,
+            Arguments = "", // overridden by ArgumentList below
             WorkingDirectory = workingDirectory ?? Directory.GetCurrentDirectory(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -39,6 +43,8 @@ public sealed partial class LocalBackend : IExecutionBackend
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+        psi.ArgumentList.Add(shellArg);
+        psi.ArgumentList.Add(command);
 
         using var process = new Process { StartInfo = psi };
         process.Start();

@@ -81,7 +81,9 @@ public sealed class DockerBackend : IExecutionBackend
         var psi = new ProcessStartInfo
         {
             FileName = "docker",
-            Arguments = string.Join(" ", args),
+            // ArgumentList is populated below — `Arguments` here is dead code but required
+            // to satisfy the compiler (ProcessStartInfo has no parameterless constructor).
+            Arguments = "",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -90,8 +92,7 @@ public sealed class DockerBackend : IExecutionBackend
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Use ArgumentList instead of Arguments string to prevent shell injection.
-        // Each argument is passed verbatim — the shell never parses it.
+        // Each argument is passed verbatim — the shell never parses the CLI string.
         psi.ArgumentList.Clear();
         foreach (var arg in args)
         {
