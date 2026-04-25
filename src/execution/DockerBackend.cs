@@ -2,6 +2,7 @@ namespace Hermes.Agent.Execution;
 
 using System.Diagnostics;
 using System.Text;
+using System.Collections.ObjectModel;
 
 // ══════════════════════════════════════════════
 // Docker Execution Backend
@@ -27,40 +28,60 @@ public sealed class DockerBackend : IExecutionBackend
         var image = _config.DockerImage ?? "ubuntu:latest";
         var sw = Stopwatch.StartNew();
 
-        // Build docker run command
-        var args = new StringBuilder("run --rm");
+        // Build docker run arguments safely — command is passed as a separate argument to bash -c
+        // to prevent shell injection. The command is NOT interpolated into the docker CLI string.
+        // Using ArgumentList (not string concatenation) so each arg is passed verbatim.
+        var args = new Collection<string>
+        {
+            "run",
+            "--rm"
+        };
 
         // Working directory
         if (workingDirectory is not null)
-            args.Append($" -w \"{workingDirectory}\"");
+        {
+            args.Add("-w");
+            args.Add(workingDirectory);
+        }
 
         // Volumes
         foreach (var vol in _config.DockerVolumes)
-            args.Append($" -v \"{vol}\"");
+        {
+            args.Add("-v");
+            args.Add(vol);
+        }
 
         // Mount current directory if no explicit volumes
         if (_config.DockerVolumes.Count == 0)
         {
             var cwd = workingDirectory ?? Directory.GetCurrentDirectory();
-            args.Append($" -v \"{cwd}:{cwd}\" -w \"{cwd}\"");
+            args.Add("-v");
+            args.Add($"{cwd}:{cwd}");
+            args.Add("-w");
+            args.Add(cwd);
         }
 
         // Environment variables
         foreach (var (key, value) in _config.DockerEnv)
-            args.Append($" -e \"{key}={value}\"");
+        {
+            args.Add("-e");
+            args.Add($"{key}={value}");
+        }
 
         // Resource limits
-        args.Append(" --memory=2g --cpus=2");
+        args.Add("--memory=2g");
+        args.Add("--cpus=2");
 
-        // Network (disable for sandboxed mode)
-        // args.Append(" --network=none"); // Uncomment for full sandbox
-
-        args.Append($" {image} /bin/bash -c \"{command.Replace("\"", "\\\"")}\"");
+        // Image + command passed as separate arguments to prevent shell injection
+        args.Add(image);
+        args.Add("/bin/bash");
+        args.Add("-c");
+        args.Add(command);
 
         var psi = new ProcessStartInfo
         {
             FileName = "docker",
-            Arguments = args.ToString(),
+            Arguments = string.Join(" ", args),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -68,6 +89,14 @@ public sealed class DockerBackend : IExecutionBackend
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+
+        // Use ArgumentList instead of Arguments string to prevent shell injection.
+        // Each argument is passed verbatim — the shell never parses it.
+        psi.ArgumentList.Clear();
+        foreach (var arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
 
         using var process = new Process { StartInfo = psi };
         process.Start();
