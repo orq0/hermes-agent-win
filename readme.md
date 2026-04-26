@@ -1,5 +1,16 @@
 This is a clone from https://github.com/RedWoodOG/Hermes-Desktop
 
+# Disclaimer
+
+This repository is an independent fork or derivative project based on publicly available open-source software.
+
+While portions of the original technology may derive from open-source projects associated with Nous Research and RedWoodOG’s , this repository is **not officially affiliated with, endorsed by, or maintained by** those original creators.
+
+All credit for the original framework, research, and foundational code belongs to their respective authors under their applicable open-source licenses. This repository represents independent modifications, development decisions, and maintenance separate from the upstream sources.
+
+References to original projects are provided solely for attribution and transparency in accordance with open-source practices.
+
+
 # Hermes Desktop Updated
 
 <p align="center">
