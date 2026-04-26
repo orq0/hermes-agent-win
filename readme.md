@@ -1,5 +1,7 @@
-This is a clone from https://github.com/RedWoodOG/Hermes-Desktop
-Please support https://github.com/NousResearch/hermes-agent
+PLease support
+https://github.com/NousResearch/hermes-agent
+https://github.com/RedWoodOG/Hermes-Desktop
+
 
 # Disclaimer
 
