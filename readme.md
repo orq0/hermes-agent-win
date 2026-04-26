@@ -1,6 +1,5 @@
 PLease support
-https://github.com/NousResearch/hermes-agent
-https://github.com/RedWoodOG/Hermes-Desktop
+https://github.com/NousResearch/hermes-agent and https://github.com/RedWoodOG/Hermes-Desktop
 
 
 # Disclaimer
